@@ -1,10 +1,23 @@
-# Dependencies
+# ============================================================
+#  Caged Cipher · Git Ignore
+#  只保留源代码和游戏资源，排除所有依赖和临时文件
+# ============================================================
+
+# --- 虚拟环境 & 依赖 ---
 node_modules/
 .venv*/
 venv/
 env/
 
-# IDE & Editor
+# --- AI 模型文件 ---
+models/
+*.ckpt
+*.pth
+*.onnx
+*.safetensors
+*.pt
+
+# --- IDE & Editor ---
 .vscode/
 .idea/
 *.swp
@@ -12,46 +25,51 @@ env/
 *~
 .DS_Store
 
-# MimoCode / Trae internal
+# --- MimoCode / Trae internal ---
 .mimocode/
+.trae/
 
-# Uploads & temp files
+# --- Uploads & temp files ---
 .uploads/
 uploads/
 tmp/
 temp/
 
-# Logs
+# --- Logs ---
 logs/
 *.log
 npm-debug.log*
 
-# Output / build
+# --- Output / build ---
 output/
 build/
 dist/
 
-# Cache
+# --- Cache ---
 .cache/
 .parcel-cache/
 .next/
 
-# Environment
+# --- Environment ---
 .env
 .env.local
 .env.*.local
 
-# OS
+# --- OS ---
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
 
-# Audio temp
+# --- Audio temp ---
 *.wav.bak
 *.mp3.tmp
+
+# --- 备份文件 ---
+*.bak
+*.backup
