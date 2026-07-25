@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Caged Cipher · 笼中密码</title>
+  <style>
+    /* ============================================
+       扉页 · 侦探案卷夹 · 牛皮封面 · 烫金标题 v2.0
+       ============================================ */
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(ellipse at 20% 20%, rgba(60, 45, 30, 0.5) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(40, 30, 20, 0.4) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, rgba(50, 38, 28, 0.2) 0%, transparent 70%),
+        #15100d;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      padding: 20px;
+      opacity: 0;
+      animation: fadeIn 1s ease forwards;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    /* 主封面 — 植鞣革 + 牛皮纸多层纹理 */
+    .cover {
+      width: 100%;
+      max-width: 420px;
+      padding: 52px 30px 40px;
+      background:
+        /* 边角磨损阴影 */
+        radial-gradient(ellipse at 0% 0%, rgba(0, 0, 0, 0.25) 0%, transparent 30%),
+        radial-gradient(ellipse at 100% 0%, rgba(0, 0, 0, 0.2) 0%, transparent 25%),
+        radial-gradient(ellipse at 0% 100%, rgba(0, 0, 0, 0.2) 0%, transparent 28%),
+        radial-gradient(ellipse at 100% 100%, rgba(0, 0, 0, 0.25) 0%, transparent 30%),
+        /* 皮革高光 */
+        radial-gradient(ellipse at 35% 25%, rgba(120, 95, 70, 0.15) 0%, transparent 45%),
+        radial-gradient(ellipse at 65% 75%, rgba(80, 62, 48, 0.1) 0%, transparent 40%),
+        /* 底色渐变 */
+        linear-gradient(160deg, #3d322a 0%, #2a211c 40%, #241b16 70%, #1a1310 100%);
+      border-radius: 8px;
+      box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.7),
+        0 4px 12px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(201, 168, 76, 0.08),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+      text-align: center;
+      position: relative;
+      border: 1px solid rgba(201, 168, 76, 0.15);
+    }
+
+    /* 皮革纹理层 — 细密斜线 + 噪点感 */
+    .cover::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 8px;
+      background:
+        /* 斜线纹理（皮革毛孔感） */
+        repeating-linear-gradient(42deg,
+          transparent 0px, transparent 2px,
+          rgba(0, 0, 0, 0.06) 2px, rgba(0, 0, 0, 0.06) 3px,
+          transparent 3px, transparent 5px),
+        repeating-linear-gradient(-42deg,
+          transparent 0px, transparent 2px,
+          rgba(0, 0, 0, 0.03) 2px, rgba(0, 0, 0, 0.03) 3px,
+          transparent 3px, transparent 5px),
+        /* 细密横线 */
+        repeating-linear-gradient(0deg,
+          transparent 0px, transparent 4px,
+          rgba(0, 0, 0, 0.02) 4px, rgba(0, 0, 0, 0.02) 5px);
+      pointer-events: none;
+      mix-blend-mode: multiply;
+    }
+
+    /* 内边框装饰 — 金色双线 */
+    .cover::after {
+      content: '';
+      position: absolute;
+      inset: 12px;
+      border: 1px solid rgba(201, 168, 76, 0.2);
+      border-radius: 4px;
+      pointer-events: none;
+      box-shadow:
+        inset 0 0 0 3px transparent,
+        inset 0 0 0 4px rgba(201, 168, 76, 0.06);
+    }
+
+    /* 装饰角标 — 强化金色 */
+    .corner-mark {
+      position: absolute;
+      font-size: 14px;
+      color: rgba(201, 168, 76, 0.35);
+      letter-spacing: 2px;
+      z-index: 2;
+      text-shadow: 0 0 8px rgba(201, 168, 76, 0.3);
+    }
+    .corner-mark.tl { top: 20px; left: 26px; }
+    .corner-mark.tr { top: 20px; right: 26px; }
+    .corner-mark.bl { bottom: 20px; left: 26px; }
+    .corner-mark.br { bottom: 20px; right: 26px; }
+
+    /* 顶部徽章装饰 */
+    .cover-badge {
+      position: relative;
+      z-index: 2;
+      margin-bottom: 16px;
+      font-size: 32px;
+      filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
+      animation: badgeFloat 4s ease-in-out infinite;
+    }
+
+    @keyframes badgeFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-3px); }
+    }
+
+    /* 标题区 */
+    .title-section {
+      position: relative;
+      z-index: 2;
+      padding: 8px 0 22px;
+    }
+
+    /* 烫金英文标题 — 多层阴影营造凸起烫金感 */
+    .logo-en {
+      font-family: "Times New Roman", "Georgia", "Noto Serif SC", serif;
+      font-size: 36px;
+      font-weight: 700;
+      background: linear-gradient(180deg,
+        #f5e6a8 0%,
+        #e6d078 20%,
+        #c9a84c 45%,
+        #a8882f 65%,
+        #d4b86a 80%,
+        #f0de96 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: #c9a84c;
+      text-shadow:
+        0 1px 0 rgba(255, 240, 180, 0.3),
+        0 -1px 0 rgba(120, 80, 20, 0.4),
+        0 2px 4px rgba(0, 0, 0, 0.5),
+        0 4px 8px rgba(0, 0, 0, 0.3),
+        0 0 30px rgba(201, 168, 76, 0.15);
+      letter-spacing: 10px;
+      line-height: 1.3;
+      position: relative;
+      animation: titleGlow 3s ease-in-out infinite alternate;
+    }
+
+    @keyframes titleGlow {
+      from { filter: drop-shadow(0 0 6px rgba(201, 168, 76, 0.25)); }
+      to { filter: drop-shadow(0 0 18px rgba(201, 168, 76, 0.5)); }
+    }
+
+    .logo-zh {
+      font-family: "Georgia", "KaiTi", "STKaiti", "Noto Serif SC", serif;
+      font-size: 18px;
+      color: #d4b86a;
+      letter-spacing: 8px;
+      margin-top: 10px;
+      text-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.5),
+        0 0 12px rgba(201, 168, 76, 0.2);
+    }
+
+    .tagline {
+      font-size: 11px;
+      color: rgba(201, 168, 76, 0.35);
+      letter-spacing: 3px;
+      margin-top: 12px;
+      font-family: "Courier New", monospace;
+    }
+
+    .divider {
+      width: 80px;
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(201, 168, 76, 0.15) 20%,
+        rgba(201, 168, 76, 0.4) 50%,
+        rgba(201, 168, 76, 0.15) 80%,
+        transparent 100%);
+      margin: 20px auto 18px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .divider::before {
+      content: '✦';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 10px;
+      color: rgba(201, 168, 76, 0.5);
+      background: #2a211c;
+      padding: 0 8px;
+    }
+
+    /* 菜单区域 */
+    .menu-area {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    /* 皮革质感菜单按钮 */
+    .menu-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 18px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      border: 1px solid rgba(201, 168, 76, 0.08);
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(90, 70, 52, 0.2) 0%, transparent 60%),
+        linear-gradient(180deg, #332820 0%, #261d17 100%);
+      box-shadow:
+        0 2px 4px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(201, 168, 76, 0.06),
+        inset 0 -2px 0 rgba(0, 0, 0, 0.2);
+    }
+
+    .menu-item:hover {
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(120, 95, 70, 0.25) 0%, transparent 60%),
+        linear-gradient(180deg, #3d3128 0%, #2d231c 100%);
+      border-color: rgba(201, 168, 76, 0.3);
+      box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.4),
+        0 0 20px rgba(201, 168, 76, 0.1),
+        inset 0 1px 0 rgba(201, 168, 76, 0.12),
+        inset 0 -2px 0 rgba(0, 0, 0, 0.2);
+      transform: translateY(-1px);
+    }
+
+    .menu-item:active {
+      transform: translateY(2px);
+      box-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.3),
+        inset 0 2px 4px rgba(0, 0, 0, 0.3),
+        inset 0 -1px 0 rgba(201, 168, 76, 0.04);
+      border-bottom-width: 1px;
+    }
+
+    .menu-item.continue-item {
+      background:
+        linear-gradient(90deg, rgba(201, 168, 76, 0.15) 0%, rgba(201, 168, 76, 0.02) 50%, transparent 100%),
+        radial-gradient(ellipse at 30% 20%, rgba(90, 70, 52, 0.2) 0%, transparent 60%),
+        linear-gradient(180deg, #332820 0%, #261d17 100%);
+      border-left: 3px solid #c9a84c;
+      padding-left: 15px;
+      box-shadow:
+        0 2px 4px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(201, 168, 76, 0.08),
+        inset 0 -2px 0 rgba(0, 0, 0, 0.2);
+    }
+
+    .menu-item.continue-item:hover {
+      background:
+        linear-gradient(90deg, rgba(201, 168, 76, 0.22) 0%, rgba(201, 168, 76, 0.04) 50%, transparent 100%),
+        radial-gradient(ellipse at 30% 20%, rgba(120, 95, 70, 0.25) 0%, transparent 60%),
+        linear-gradient(180deg, #3d3128 0%, #2d231c 100%);
+      box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.4),
+        0 0 25px rgba(201, 168, 76, 0.15),
+        inset 0 1px 0 rgba(201, 168, 76, 0.15),
+        inset 0 -2px 0 rgba(0, 0, 0, 0.2);
+    }
+
+    .menu-item-icon {
+      font-size: 18px;
+      width: 28px;
+      text-align: center;
+      flex-shrink: 0;
+      opacity: 0.75;
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+    }
+
+    .menu-item-content {
+      flex: 1;
+      min-width: 0;
+      text-align: left;
+    }
+
+    .menu-item-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #d4c5a8;
+      letter-spacing: 2px;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+
+    .menu-item.continue-item .menu-item-title {
+      color: #e0c878;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 8px rgba(201, 168, 76, 0.2);
+    }
+
+    .menu-item-subtitle {
+      font-size: 11px;
+      color: rgba(196, 181, 160, 0.45);
+      margin-top: 2px;
+      letter-spacing: 1px;
+      font-family: "Courier New", monospace;
+    }
+
+    .menu-item-arrow {
+      color: rgba(201, 168, 76, 0.3);
+      font-size: 14px;
+      flex-shrink: 0;
+      transition: transform 0.2s ease;
+    }
+
+    .menu-item:hover .menu-item-arrow {
+      color: #c9a84c;
+      transform: translateX(2px);
+    }
+
+    .menu-separator {
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(201, 168, 76, 0.08) 30%,
+        rgba(201, 168, 76, 0.15) 50%,
+        rgba(201, 168, 76, 0.08) 70%,
+        transparent 100%);
+      margin: 4px 12px;
+    }
+
+    /* 底部档案号 */
+    .footer {
+      font-size: 10px;
+      color: rgba(201, 168, 76, 0.3);
+      letter-spacing: 3px;
+      margin-top: 26px;
+      font-family: "Courier New", monospace;
+      position: relative;
+      z-index: 2;
+    }
+
+    .footer .ver {
+      margin-left: 12px;
+      padding-left: 12px;
+      border-left: 1px solid rgba(201, 168, 76, 0.15);
+    }
+
+    /* 模态框 — 案卷档案风格 */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    .modal-overlay.show {
+      display: flex;
+      opacity: 1;
+    }
+    .modal {
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(90, 70, 52, 0.25) 0%, transparent 60%),
+        linear-gradient(180deg, #2a211c 0%, #1f1814 100%);
+      border: 1px solid rgba(201, 168, 76, 0.25);
+      border-radius: 8px;
+      padding: 28px 24px;
+      max-width: 360px;
+      width: 100%;
+      box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(201, 168, 76, 0.08);
+      transform: scale(0.92) translateY(16px);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+    }
+    .modal::before {
+      content: '';
+      position: absolute;
+      inset: 8px;
+      border: 1px solid rgba(201, 168, 76, 0.1);
+      border-radius: 4px;
+      pointer-events: none;
+    }
+    .modal-overlay.show .modal {
+      transform: scale(1) translateY(0);
+    }
+    .modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #c9a84c;
+      margin-bottom: 12px;
+      letter-spacing: 3px;
+      font-family: "Georgia", "Noto Serif SC", serif;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      position: relative;
+    }
+    .modal-text {
+      font-size: 13px;
+      color: #b8a888;
+      line-height: 1.8;
+      margin-bottom: 20px;
+      position: relative;
+    }
+    .modal-buttons {
+      display: flex;
+      gap: 10px;
+      position: relative;
+    }
+    .modal-btn {
+      flex: 1;
+      padding: 11px;
+      border: 1px solid rgba(201, 168, 76, 0.2);
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(90, 70, 52, 0.2) 0%, transparent 60%),
+        linear-gradient(180deg, #332820 0%, #261d17 100%);
+      color: #c4b5a0;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+      letter-spacing: 2px;
+      box-shadow:
+        0 2px 4px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(201, 168, 76, 0.05);
+    }
+    .modal-btn:hover {
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(120, 95, 70, 0.25) 0%, transparent 60%),
+        linear-gradient(180deg, #3d3128 0%, #2d231c 100%);
+      border-color: rgba(201, 168, 76, 0.4);
+      box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.4),
+        0 0 15px rgba(201, 168, 76, 0.08),
+        inset 0 1px 0 rgba(201, 168, 76, 0.1);
+      transform: translateY(-1px);
+    }
+    .modal-btn:active {
+      transform: translateY(2px);
+      box-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.3),
+        inset 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    .modal-btn.primary {
+      background:
+        linear-gradient(180deg, #e0c878 0%, #c9a84c 45%, #a8882f 100%);
+      border-color: #c9a84c;
+      color: #1a1512;
+      box-shadow:
+        0 2px 6px rgba(0, 0, 0, 0.3),
+        0 0 12px rgba(201, 168, 76, 0.2),
+        inset 0 1px 0 rgba(255, 240, 180, 0.4);
+    }
+    .modal-btn.primary:hover {
+      background:
+        linear-gradient(180deg, #f0d888 0%, #d4b86a 45%, #b8983f 100%);
+      box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.4),
+        0 0 20px rgba(201, 168, 76, 0.35),
+        inset 0 1px 0 rgba(255, 240, 180, 0.5);
+    }
+    .modal-btn.danger {
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(185, 28, 28, 0.15) 0%, transparent 60%),
+        linear-gradient(180deg, #3a2020 0%, #2a1818 100%);
+      border-color: rgba(185, 28, 28, 0.3);
+      color: #f87171;
+    }
+    .modal-btn.danger:hover {
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(185, 28, 28, 0.25) 0%, transparent 60%),
+        linear-gradient(180deg, #4a2828 0%, #3a2020 100%);
+      border-color: rgba(185, 28, 28, 0.5);
+      box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.4),
+        0 0 15px rgba(185, 28, 28, 0.15);
+    }
+
+    /* 关于面板 */
+    .about-content {
+      max-height: 55vh;
+      overflow-y: auto;
+      position: relative;
+    }
+    .about-section {
+      margin-bottom: 16px;
+      position: relative;
+    }
+    .about-section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #c9a84c;
+      margin-bottom: 8px;
+      letter-spacing: 2px;
+      font-family: "Georgia", serif;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+    .about-section p {
+      font-size: 12px;
+      color: #b8a888;
+      line-height: 1.8;
+      margin-bottom: 4px;
+    }
+    .about-credit {
+      font-size: 12px;
+      color: #9a8a6e;
+      line-height: 1.9;
+    }
+    .about-credit .role {
+      color: #7a6a52;
+      margin-right: 8px;
+      font-family: "Courier New", monospace;
+    }
+
+    /* 设置面板 */
+    .settings-modal {
+      max-width: 400px;
+    }
+    .settings-group {
+      margin-bottom: 18px;
+    }
+    .settings-group-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #c9a84c;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      margin-bottom: 10px;
+      font-family: "Georgia", serif;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(201, 168, 76, 0.08);
+    }
+    .setting-row:last-child { border-bottom: none; }
+    .setting-label {
+      font-size: 13px;
+      color: #c4b5a0;
+    }
+    .setting-toggle {
+      width: 40px; height: 22px;
+      background:
+        radial-gradient(ellipse at 30% 30%, rgba(0, 0, 0, 0.2) 0%, transparent 60%),
+        linear-gradient(180deg, #1a1310 0%, #261d17 100%);
+      border: 1px solid rgba(201, 168, 76, 0.2);
+      border-radius: 11px;
+      position: relative;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+    .setting-toggle.active {
+      background:
+        radial-gradient(ellipse at 30% 30%, rgba(201, 168, 76, 0.2) 0%, transparent 60%),
+        linear-gradient(180deg, #3a2f20 0%, #2a2118 100%);
+      border-color: rgba(201, 168, 76, 0.5);
+      box-shadow:
+        inset 0 1px 3px rgba(0, 0, 0, 0.3),
+        0 0 8px rgba(201, 168, 76, 0.15);
+    }
+    .setting-toggle::after {
+      content: '';
+      position: absolute; top: 2px; left: 2px;
+      width: 16px; height: 16px;
+      background: linear-gradient(180deg, #8b7d68 0%, #6b5d4a 100%);
+      border-radius: 50%;
+      transition: all 0.2s;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+    .setting-toggle.active::after {
+      left: 20px;
+      background: linear-gradient(180deg, #e0c878 0%, #c9a84c 60%, #a8882f 100%);
+      box-shadow:
+        0 1px 3px rgba(0, 0, 0, 0.4),
+        0 0 8px rgba(201, 168, 76, 0.4);
+    }
+    .setting-slider-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(201, 168, 76, 0.08);
+    }
+    .setting-slider-row:last-child { border-bottom: none; }
+    .setting-slider-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #c4b5a0;
+    }
+    .setting-slider-value {
+      color: #c9a84c;
+      font-weight: 600;
+      font-family: "Courier New", monospace;
+    }
+    .setting-slider {
+      width: 100%;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background:
+        linear-gradient(90deg, rgba(201, 168, 76, 0.3) var(--val, 70%), rgba(60, 50, 40, 0.6) var(--val, 70%));
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+    .setting-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: linear-gradient(180deg, #e0c878 0%, #c9a84c 60%, #a8882f 100%);
+      cursor: pointer;
+      box-shadow:
+        0 1px 4px rgba(0, 0, 0, 0.4),
+        0 0 6px rgba(201, 168, 76, 0.3);
+      border: 1px solid rgba(201, 168, 76, 0.6);
+    }
+
+    /* 响应式 */
+    @media (max-width: 480px) {
+      .cover { padding: 36px 20px 28px; }
+      .logo-en { font-size: 28px; letter-spacing: 6px; }
+      .logo-zh { font-size: 15px; letter-spacing: 6px; }
+      .menu-item { padding: 12px 14px; }
+      .menu-item-title { font-size: 13px; }
+      .corner-mark.tl { top: 18px; left: 22px; }
+      .corner-mark.tr { top: 18px; right: 22px; }
+      .corner-mark.bl { bottom: 18px; left: 22px; }
+      .corner-mark.br { bottom: 18px; right: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="cover">
+    <span class="corner-mark tl">✦</span>
+    <span class="corner-mark tr">✦</span>
+    <span class="corner-mark bl">✦</span>
+    <span class="corner-mark br">✦</span>
+
+    <!-- 顶部徽章 -->
+    <div class="cover-badge">🔒</div>
+
+    <!-- 标题区 -->
+    <div class="title-section">
+      <div class="logo-en">CAGED CIPHER</div>
+      <div class="logo-zh">「 笼 中 密 码 」</div>
+      <div class="tagline">— 解开数字的牢笼 —</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 菜单区域 -->
+    <div class="menu-area">
+      <!-- 继续游戏 -->
+      <div class="menu-item continue-item" id="btn-continue" style="display:none;">
+        <div class="menu-item-icon">▶</div>
+        <div class="menu-item-content">
+          <div class="menu-item-title">继续调查</div>
+          <div class="menu-item-subtitle" id="continue-subtitle">第1章 · 第1关</div>
+        </div>
+        <div class="menu-item-arrow">›</div>
+      </div>
+
+      <div id="continue-divider" style="display:none;">
+        <div class="menu-separator"></div>
+      </div>
+
+      <!-- 新游戏 -->
+      <div class="menu-item" id="btn-new-game">
+        <div class="menu-item-icon">📜</div>
+        <div class="menu-item-content">
+          <div class="menu-item-title">开启卷宗</div>
+          <div class="menu-item-subtitle">从头开始调查</div>
+        </div>
+        <div class="menu-item-arrow">›</div>
+      </div>
+
+      <div class="menu-separator"></div>
+
+      <!-- 章节选择 -->
+      <div class="menu-item" id="btn-chapter-select">
+        <div class="menu-item-icon">📖</div>
+        <div class="menu-item-content">
+          <div class="menu-item-title">章节选择</div>
+          <div class="menu-item-subtitle">已解锁的档案</div>
+        </div>
+        <div class="menu-item-arrow">›</div>
+      </div>
+
+      <!-- 设置 -->
+      <div class="menu-item" id="btn-settings">
+        <div class="menu-item-icon">⚙</div>
+        <div class="menu-item-content">
+          <div class="menu-item-title">设置</div>
+          <div class="menu-item-subtitle">音量与游戏选项</div>
+        </div>
+        <div class="menu-item-arrow">›</div>
+      </div>
+
+      <!-- 关于 -->
+      <div class="menu-item" id="btn-about">
+        <div class="menu-item-icon">ℹ</div>
+        <div class="menu-item-content">
+          <div class="menu-item-title">关于</div>
+          <div class="menu-item-subtitle">版本与制作人员</div>
+        </div>
+        <div class="menu-item-arrow">›</div>
+      </div>
+    </div>
+
+    <!-- 底部档案号 -->
+    <div class="footer">
+      档案编号：CC-001
+      <span class="ver">v1.0.0</span>
+    </div>
+  </div>
+
+  <!-- 新游戏确认模态框 -->
+  <div class="modal-overlay" id="new-game-modal">
+    <div class="modal">
+      <div class="modal-title">开启新卷宗</div>
+      <div class="modal-text" id="new-game-text">
+        即将开启一份新的调查档案。<br><br>
+        当前的调查进度将被保留，你可以随时从「继续调查」回到之前的进度。
+      </div>
+      <div class="modal-buttons">
+        <button class="modal-btn" id="btn-new-cancel">取消</button>
+        <button class="modal-btn primary" id="btn-new-confirm">确认开启</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 关于模态框 -->
+  <div class="modal-overlay" id="about-modal">
+    <div class="modal">
+      <div class="modal-title">关于卷宗</div>
+      <div class="about-content">
+        <div class="about-section">
+          <div class="about-section-title">档案简介</div>
+          <p>《笼中密码 Caged Cipher》是一款融合剧情与解谜的杀手数独游戏。</p>
+          <p>在尘封的数字档案馆中，你将扮演沈墨，循着一封匿名信的指引，一步步揭开被数字牢笼封存的真相。</p>
+        </div>
+        <div class="about-section">
+          <div class="about-section-title">档案版本</div>
+          <p>v1.0.0</p>
+        </div>
+        <div class="about-section">
+          <div class="about-section-title">制作人员</div>
+          <div class="about-credit">
+            <div><span class="role">制作人</span>Caged Cipher Team</div>
+            <div><span class="role">策划</span>Agent A</div>
+            <div><span class="role">程序</span>Agent B</div>
+            <div><span class="role">UI/UX</span>Agent C</div>
+            <div><span class="role">剧情</span>Agent D</div>
+          </div>
+        </div>
+        <div class="about-section">
+          <div class="about-section-title">特别鸣谢</div>
+          <div class="about-credit">
+            <div>· 所有参与测试的玩家</div>
+            <div>· 开源社区的开发者们</div>
+            <div>· 每一位热爱数独的你</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-buttons" style="margin-top: 20px;">
+        <button class="modal-btn primary" id="btn-about-close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 设置模态框 -->
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal settings-modal">
+      <div class="modal-title">档案设置</div>
+      <div class="about-content">
+        <div class="settings-group">
+          <div class="settings-group-title">🔊 音量</div>
+          <div class="setting-slider-row">
+            <div class="setting-slider-label">
+              <span>总音量</span>
+              <span class="setting-slider-value" id="vol-master-val">70</span>
+            </div>
+            <input type="range" class="setting-slider" id="vol-master" min="0" max="100" value="70">
+          </div>
+          <div class="setting-slider-row">
+            <div class="setting-slider-label">
+              <span>背景音乐</span>
+              <span class="setting-slider-value" id="vol-bgm-val">40</span>
+            </div>
+            <input type="range" class="setting-slider" id="vol-bgm" min="0" max="100" value="40">
+          </div>
+          <div class="setting-slider-row">
+            <div class="setting-slider-label">
+              <span>音效</span>
+              <span class="setting-slider-value" id="vol-sfx-val">60</span>
+            </div>
+            <input type="range" class="setting-slider" id="vol-sfx" min="0" max="100" value="60">
+          </div>
+          <div class="setting-slider-row">
+            <div class="setting-slider-label">
+              <span>语音</span>
+              <span class="setting-slider-value" id="vol-voice-val">85</span>
+            </div>
+            <input type="range" class="setting-slider" id="vol-voice" min="0" max="100" value="85">
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <div class="settings-group-title">🎮 游戏设置</div>
+          <div class="setting-row">
+            <span class="setting-label">冲突高亮</span>
+            <div class="setting-toggle active" data-setting="conflictRed"></div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">即时错误检查</span>
+            <div class="setting-toggle active" data-setting="instantErrorCheck"></div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">自动清除候选数</span>
+            <div class="setting-toggle active" data-setting="autoClearCandidates"></div>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <div class="settings-group-title">👁 显示设置</div>
+          <div class="setting-row">
+            <span class="setting-label">显示笼子和值</span>
+            <div class="setting-toggle active" data-setting="showCageSum"></div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">高亮同数字</span>
+            <div class="setting-toggle active" data-setting="highlightSameNumber"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-buttons" style="margin-top: 20px;">
+        <button class="modal-btn primary" id="btn-settings-close">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // === 进度存储键 ===
+    const PROGRESS_KEY = 'cagedcipher_progress';
+    const SETTINGS_KEY = 'game_settings';
+
+    // === 读取进度 ===
+    function getProgress() {
+      try {
+        const raw = localStorage.getItem(PROGRESS_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      return null;
+    }
+
+    function getSettings() {
+      try {
+        const raw = localStorage.getItem(SETTINGS_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      return null;
+    }
+
+    function saveSettings(settings) {
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      } catch (e) {}
+    }
+
+    // === 获取关卡信息 ===
+    function getLevelInfo(levelId) {
+      const chapterId = Math.floor(levelId / 100);
+      const levelInChapter = levelId % 100;
+      return { chapterId, levelInChapter };
+    }
+
+    function formatTime(seconds) {
+      if (!seconds) return '00:00';
+      const min = Math.floor(seconds / 60);
+      const sec = seconds % 60;
+      return String(min).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+    }
+
+    // === 初始化继续游戏按钮 ===
+    function initContinueButton() {
+      const progress = getProgress();
+      const btn = document.getElementById('btn-continue');
+      const divider = document.getElementById('continue-divider');
+      const subtitle = document.getElementById('continue-subtitle');
+
+      if (!progress || !progress.lastPlayedLevel) {
+        btn.style.display = 'none';
+        divider.style.display = 'none';
+        return;
+      }
+
+      const levelId = progress.lastPlayedLevel;
+      const info = getLevelInfo(levelId);
+      let timeText = '';
+
+      if (progress.levelScores && progress.levelScores[levelId]) {
+        timeText = ' · 用时 ' + formatTime(progress.levelScores[levelId].time);
+      }
+
+      subtitle.textContent = '第' + info.chapterId + '章 · 第' + info.levelInChapter + '关' + timeText;
+      btn.style.display = 'flex';
+      divider.style.display = 'block';
+    }
+
+    // === 跳转到游戏 ===
+    function goToGame(levelId, fromChapterSelect) {
+      let url = 'guide.html';
+      if (levelId) {
+        url += '?id=' + levelId;
+      } else if (fromChapterSelect) {
+        url += '?mode=chapterSelect';
+      }
+      window.location.href = url;
+    }
+
+    // === 模态框控制 ===
+    function showModal(id) {
+      const modal = document.getElementById(id);
+      if (modal) {
+        modal.classList.add('show');
+      }
+    }
+
+    function hideModal(id) {
+      const modal = document.getElementById(id);
+      if (modal) {
+        modal.classList.remove('show');
+      }
+    }
+
+    // === 初始化设置面板 ===
+    function initSettingsPanel() {
+      const saved = getSettings();
+      if (!saved) return;
+
+      // 音量滑块
+      const volMap = {
+        'vol-master': 'master',
+        'vol-bgm': 'bgm',
+        'vol-sfx': 'sfx',
+        'vol-voice': 'voice'
+      };
+
+      for (const sliderId in volMap) {
+        const type = volMap[sliderId];
+        const slider = document.getElementById(sliderId);
+        const valEl = document.getElementById(sliderId + '-val');
+        if (slider && saved.volume && typeof saved.volume[type] === 'number') {
+          slider.value = saved.volume[type];
+          if (valEl) valEl.textContent = saved.volume[type];
+        }
+      }
+
+      // 开关
+      const toggleMap = {
+        'conflictRed': ['game', 'conflictRed'],
+        'instantErrorCheck': ['game', 'instantErrorCheck'],
+        'autoClearCandidates': ['game', 'autoClearCandidates'],
+        'showCageSum': ['display', 'showCageSum'],
+        'highlightSameNumber': ['display', 'highlightSameNumber']
+      };
+
+      document.querySelectorAll('.setting-toggle').forEach(toggle => {
+        const key = toggle.dataset.setting;
+        const map = toggleMap[key];
+        if (map && saved[map[0]] && typeof saved[map[0]][map[1]] === 'boolean') {
+          if (saved[map[0]][map[1]]) {
+            toggle.classList.add('active');
+          } else {
+            toggle.classList.remove('active');
+          }
+        }
+      });
+    }
+
+    function bindSettingsEvents() {
+      // 音量滑块
+      const sliders = ['vol-master', 'vol-bgm', 'vol-sfx', 'vol-voice'];
+      sliders.forEach(id => {
+        const slider = document.getElementById(id);
+        const valEl = document.getElementById(id + '-val');
+        if (slider) {
+          slider.addEventListener('input', (e) => {
+            const val = e.target.value;
+            if (valEl) valEl.textContent = val;
+          });
+          slider.addEventListener('change', saveSettingsFromUI);
+        }
+      });
+
+      // 开关
+      document.querySelectorAll('.setting-toggle').forEach(toggle => {
+        toggle.addEventListener('click', () => {
+          toggle.classList.toggle('active');
+          saveSettingsFromUI();
+        });
+      });
+    }
+
+    function saveSettingsFromUI() {
+      const settings = {
+        volume: {
+          master: parseInt(document.getElementById('vol-master').value),
+          bgm: parseInt(document.getElementById('vol-bgm').value),
+          sfx: parseInt(document.getElementById('vol-sfx').value),
+          voice: parseInt(document.getElementById('vol-voice').value),
+        },
+        game: {
+          conflictRed: document.querySelector('[data-setting="conflictRed"]').classList.contains('active'),
+          instantErrorCheck: document.querySelector('[data-setting="instantErrorCheck"]').classList.contains('active'),
+          autoClearCandidates: document.querySelector('[data-setting="autoClearCandidates"]').classList.contains('active'),
+          vibration: true,
+        },
+        display: {
+          showCageSum: document.querySelector('[data-setting="showCageSum"]').classList.contains('active'),
+          highlightSameNumber: document.querySelector('[data-setting="highlightSameNumber"]').classList.contains('active'),
+          showCandidates: true,
+        }
+      };
+      saveSettings(settings);
+    }
+
+    // === 初始化事件 ===
+    document.addEventListener('DOMContentLoaded', function() {
+      initContinueButton();
+      initSettingsPanel();
+      bindSettingsEvents();
+
+      // 继续游戏
+      document.getElementById('btn-continue').addEventListener('click', function() {
+        const progress = getProgress();
+        if (progress && progress.lastPlayedLevel) {
+          goToGame(progress.lastPlayedLevel);
+        }
+      });
+
+      // 新游戏
+      document.getElementById('btn-new-game').addEventListener('click', function() {
+        const progress = getProgress();
+        if (progress && progress.lastPlayedLevel) {
+          // 有存档，显示确认
+          showModal('new-game-modal');
+        } else {
+          // 无存档，直接开始
+          goToGame(101);
+        }
+      });
+
+      // 新游戏确认
+      document.getElementById('btn-new-confirm').addEventListener('click', function() {
+        hideModal('new-game-modal');
+        // 从第1章第1关开始（保留原存档）
+        goToGame(101);
+      });
+
+      document.getElementById('btn-new-cancel').addEventListener('click', function() {
+        hideModal('new-game-modal');
+      });
+
+      // 章节选择
+      document.getElementById('btn-chapter-select').addEventListener('click', function() {
+        goToGame(null, true);
+      });
+
+      // 设置
+      document.getElementById('btn-settings').addEventListener('click', function() {
+        initSettingsPanel();
+        showModal('settings-modal');
+      });
+
+      document.getElementById('btn-settings-close').addEventListener('click', function() {
+        hideModal('settings-modal');
+      });
+
+      // 关于
+      document.getElementById('btn-about').addEventListener('click', function() {
+        showModal('about-modal');
+      });
+
+      document.getElementById('btn-about-close').addEventListener('click', function() {
+        hideModal('about-modal');
+      });
+
+      // 点击遮罩关闭模态框
+      document.querySelectorAll('.modal-overlay').forEach(overlay => {
+        overlay.addEventListener('click', function(e) {
+          if (e.target === this) {
+            this.classList.remove('show');
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

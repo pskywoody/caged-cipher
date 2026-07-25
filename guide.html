@@ -1,0 +1,3487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Caged Cipher</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; }
+    body {
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(80,60,45,0.25) 0%, transparent 60%),
+        radial-gradient(ellipse at 70% 80%, rgba(60,45,35,0.2) 0%, transparent 50%),
+        #1a1512;
+      color: #e0d5c5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    /* 游戏场景背景：保持案卷夹风格 */
+    body.game-scene-bg {
+      background-color: transparent;
+    }
+    body.game-scene-bg::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(26, 21, 18, 0.45);
+      pointer-events: none;
+      z-index: 0;
+    }
+    #game-container {
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      height: 100vh;
+      height: 100dvh;
+      background: transparent;
+      position: relative;
+      z-index: 1;
+      box-sizing: border-box;
+      transform: translateY(-10px);
+    }
+    /* 顶部状态栏 */
+    #game-header {
+      width: 100%;
+      padding: 8px 12px 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      box-sizing: border-box;
+    }
+    #game-header .header-left,
+    #game-header .header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #game-header .header-center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      min-width: 0;
+    }
+    .header-level-title {
+      font-size: 12px;
+      color: #64748b;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    /* 幕次指示器 */
+    .act-indicator {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      width: 100%;
+      max-width: 180px;
+    }
+    .act-indicator-text {
+      font-size: 12px;
+      font-weight: 600;
+      color: #22c55e;
+      letter-spacing: 0.5px;
+    }
+    .act-indicator-progress {
+      width: 100%;
+      height: 3px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .act-indicator-fill {
+      height: 100%;
+      width: 0%;
+      background: #22c55e;
+      border-radius: 2px;
+      transition: width 0.3s ease-out, background 0.3s ease;
+    }
+    #game-timer-display {
+      min-width: 60px;
+      height: 32px;
+      padding: 0 12px;
+      background: rgba(15,23,42,0.6);
+      border: 1px solid rgba(251,191,36,0.25);
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fbbf24;
+      font-family: "JetBrains Mono", monospace;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+    }
+    .header-btn {
+      width: 36px;
+      height: 36px;
+      border: 1px solid rgba(138,122,90,0.4);
+      background: rgba(50,42,35,0.6);
+      color: #c4b5a0;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      backdrop-filter: blur(8px);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+    .header-btn:hover { background: rgba(65,55,45,0.8); color: #f0d890; border-color: rgba(201,168,76,0.5); }
+    .header-btn:active { transform: scale(0.92); }
+    /* 棋盘区域 */
+    #board-area {
+      width: 100%;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 4px 4px 0;
+      box-sizing: border-box;
+      min-height: 0;
+      flex-shrink: 0;
+      position: relative;
+    }
+    /* 三幕指示灯（棋盘上边框正中央） */
+    .three-act-indicator {
+      position: absolute;
+      top: 4px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px 3px 6px;
+      background: rgba(26, 21, 18, 0.85);
+      border: 1px solid rgba(138, 122, 90, 0.5);
+      border-radius: 20px;
+      z-index: 20;
+      pointer-events: none;
+      backdrop-filter: blur(6px);
+      box-shadow:
+        0 2px 8px rgba(0,0,0,0.3),
+        inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+    .three-act-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+      transition: background 0.4s ease, box-shadow 0.4s ease;
+      /* 金属边框感 */
+      outline: 1px solid rgba(200, 180, 140, 0.4);
+      outline-offset: 1px;
+    }
+    .three-act-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #c4b5a0;
+      letter-spacing: 1px;
+      transition: color 0.3s ease;
+    }
+    /* 第一幕：绿色 - 柔和呼吸 */
+    .three-act-indicator.act-1 .three-act-dot {
+      background: #22c55e;
+      animation: act1Breath 2s ease-in-out infinite;
+    }
+    .three-act-indicator.act-1 .three-act-label {
+      color: #22c55e;
+    }
+    @keyframes act1Breath {
+      0%, 100% { opacity: 0.6; box-shadow: 0 0 4px rgba(34, 197, 94, 0.4); }
+      50%      { opacity: 1.0; box-shadow: 0 0 8px rgba(34, 197, 94, 0.7); }
+    }
+    /* 第二幕：红色 - 快速脉动 */
+    .three-act-indicator.act-2 .three-act-dot {
+      background: #ef4444;
+      animation: act2Pulse 0.7s ease-in-out infinite;
+    }
+    .three-act-indicator.act-2 .three-act-label {
+      color: #ef4444;
+    }
+    @keyframes act2Pulse {
+      0%, 100% { transform: scale(0.95); box-shadow: 0 0 5px rgba(239, 68, 68, 0.5); }
+      50%      { transform: scale(1.08); box-shadow: 0 0 10px rgba(239, 68, 68, 0.8); }
+    }
+    /* 第三幕：金色 - 光晕扩散 */
+    .three-act-indicator.act-3 .three-act-dot {
+      background: #fbbf24;
+      animation: act3Glow 1.2s ease-in-out infinite;
+    }
+    .three-act-indicator.act-3 .three-act-label {
+      color: #fbbf24;
+    }
+    @keyframes act3Glow {
+      0%, 100% { box-shadow: 0 0 4px rgba(251, 191, 36, 0.5), 0 0 8px rgba(251, 191, 36, 0.3); }
+      50%      { box-shadow: 0 0 10px rgba(251, 191, 36, 0.9), 0 0 20px rgba(251, 191, 36, 0.5), 0 0 30px rgba(251, 191, 36, 0.2); }
+    }
+    /* 通关：金色 - 常亮大光晕 */
+    .three-act-indicator.act-complete .three-act-dot {
+      background: #fbbf24;
+      animation: actCompleteGlow 2s ease-in-out infinite;
+    }
+    .three-act-indicator.act-complete .three-act-label {
+      color: #fbbf24;
+    }
+    @keyframes actCompleteGlow {
+      0%, 100% { box-shadow: 0 0 8px rgba(251, 191, 36, 0.8), 0 0 16px rgba(251, 191, 36, 0.5), 0 0 24px rgba(251, 191, 36, 0.3); }
+      50%      { box-shadow: 0 0 12px rgba(251, 191, 36, 1), 0 0 24px rgba(251, 191, 36, 0.7), 0 0 36px rgba(251, 191, 36, 0.4); }
+    }
+    /* 长按蓄力光晕效果 */
+    .long-press-halo {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      border-radius: 6px;
+      box-shadow: inset 0 0 0 0 rgba(96, 165, 250, 0);
+      transition: box-shadow 0.15s ease-out;
+      z-index: 10;
+    }
+    .long-press-halo.phase1 {
+      box-shadow: inset 0 0 20px 4px rgba(251, 191, 36, 0.3);
+    }
+    .long-press-halo.phase2 {
+      box-shadow: inset 0 0 30px 8px rgba(96, 165, 250, 0.5);
+      animation: longPressPhase2 0.6s ease-in-out infinite alternate;
+    }
+    @keyframes longPressPhase2 {
+      from { box-shadow: inset 0 0 20px 4px rgba(96, 165, 250, 0.4); }
+      to { box-shadow: inset 0 0 35px 12px rgba(96, 165, 250, 0.7); }
+    }
+    /* Landscape layout: left board, right controls */
+    @media (orientation: landscape) and (max-height: 520px) {
+      #game-container {
+        flex-direction: row;
+        max-width: 100%;
+        justify-content: center;
+        align-items: flex-start;
+        padding: 8px 16px;
+        gap: 16px;
+        min-height: 100vh;
+      }
+      #game-header { display: none; }
+      #board-area {
+        flex: 0 0 auto;
+        padding: 0;
+      }
+      #gameCanvas {
+        max-width: calc(100vh - 16px);
+        max-height: calc(100vh - 16px);
+        width: auto;
+        height: calc(100vh - 16px);
+      }
+      .landscape-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-width: 260px;
+        flex-shrink: 0;
+      }
+      .landscape-controls #toolbar {
+        order: 2;
+        margin: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        max-width: 100%;
+        background: transparent;
+        padding: 4px;
+      }
+      .landscape-controls #toolbar button {
+        width: 44px;
+        height: 44px;
+        flex: 0 0 44px;
+        display: flex !important;
+      }
+      .landscape-controls #num-pad {
+        order: 1;
+        margin-top: 0;
+        max-width: 100%;
+        padding: 4px;
+      }
+      .multi-select-hint {
+        display: none;
+      }
+      /* 横屏模式下HUD改为顶部浮动，不占棋盘空间 */
+      #boss-battle-hud {
+        position: fixed;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: auto;
+        max-width: 240px;
+        z-index: 11000;
+        margin: 0;
+        padding: 3px 10px;
+      }
+      #bottom-controls {
+        padding: 0;
+        gap: 0;
+        background: transparent;
+        border-top: none;
+      }
+      #bottom-controls::before {
+        display: none;
+      }
+    }
+    #gameCanvas {
+      width: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      aspect-ratio: 1;
+      background: #1a1d24;
+      border-radius: 6px;
+      display: block;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      touch-action: none;
+    }
+    /* 底部控制区 —— 皮革工具包整体容器 */
+    #bottom-controls {
+      width: 100%;
+      padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      box-sizing: border-box;
+      /* 深棕色植鞣革质感背景 */
+      background:
+        /* 细微斜线皮革纹理 */
+        repeating-linear-gradient(
+          45deg,
+          transparent 0px,
+          transparent 3px,
+          rgba(0, 0, 0, 0.04) 3px,
+          rgba(0, 0, 0, 0.04) 4px
+        ),
+        /* 径向光晕营造皮革弧度感 */
+        radial-gradient(
+          ellipse at 50% 0%,
+          rgba(120, 95, 70, 0.4) 0%,
+          transparent 60%
+        ),
+        /* 植鞣革底色 */
+        #3d322a;
+      border-top: 2px solid #2a221c;
+      position: relative;
+    }
+    /* 顶部缝线装饰 */
+    #bottom-controls::before {
+      content: '';
+      position: absolute;
+      top: 4px;
+      left: 16px;
+      right: 16px;
+      height: 1px;
+      /* 虚线缝线效果 */
+      background: repeating-linear-gradient(
+        to right,
+        #8a7a6a 0px,
+        #8a7a6a 6px,
+        transparent 6px,
+        transparent 12px
+      );
+      pointer-events: none;
+      opacity: 0.7;
+    }
+    /* 竖屏：工具栏只显示4个核心按钮，其他隐藏 —— 皮套插槽风格 */
+    #toolbar {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      max-width: 480px;
+      opacity: 0.9;
+      padding: 2px 0;
+    }
+    #toolbar button {
+      flex: 1;
+      height: 40px;
+      /* 皮套插槽风格：深色背景 + 金色/棕色边框 + 底部厚边 */
+      background:
+        linear-gradient(
+          180deg,
+          rgba(60, 48, 38, 0.9) 0%,
+          rgba(45, 36, 28, 0.95) 100%
+        );
+      border: 1.5px solid #8a7a5a;
+      border-bottom: 3px solid #5a4a3a;
+      color: #c4b5a0;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.12s ease;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 230, 180, 0.1),
+        0 2px 4px rgba(0, 0, 0, 0.3);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+    #toolbar button:hover {
+      background:
+        linear-gradient(
+          180deg,
+          rgba(75, 60, 48, 0.95) 0%,
+          rgba(55, 44, 34, 0.98) 100%
+        );
+      color: #e8dcc8;
+      border-color: #a09070;
+    }
+    #toolbar button:active {
+      /* 按压效果：translateY + border-bottom 变薄 */
+      transform: translateY(2px);
+      border-bottom-width: 1px;
+      box-shadow:
+        inset 0 1px 2px rgba(0, 0, 0, 0.3),
+        0 0 2px rgba(0, 0, 0, 0.2);
+    }
+    #toolbar button.active {
+      /* 激活状态：烫金色边框 + 金色文字 */
+      background:
+        linear-gradient(
+          180deg,
+          rgba(90, 70, 40, 0.95) 0%,
+          rgba(65, 50, 28, 0.98) 100%
+        );
+      border-color: #c9a84c;
+      border-bottom-color: #8a7030;
+      color: #f0d890;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 230, 150, 0.2),
+        0 0 8px rgba(201, 168, 76, 0.3),
+        0 2px 4px rgba(0, 0, 0, 0.3);
+      opacity: 1;
+    }
+    /* 竖屏隐藏非核心工具栏按钮 */
+    #toolbar #btn-chapter,
+    #toolbar #btn-pause,
+    #toolbar #btn-rule45,
+    #toolbar #btn-techniques,
+    #toolbar #btn-tech-matrix,
+    #toolbar #btn-gallery,
+    #toolbar #btn-settings,
+    #toolbar #btn-achievement {
+      display: none;
+    }
+    /* Number pad —— 核心操作区，铆钉/金属扣风格大按钮 */
+    #num-pad {
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      gap: 5px;
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      justify-items: center;
+      padding: 4px 2px 2px;
+    }
+    .num-btn {
+      width: 100%;
+      height: 60px;
+      min-height: 56px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      /* 铆钉/金属扣风格：圆角方形 + 内阴影凹陷感 */
+      border: 2px solid #6a5a4a;
+      border-radius: 10px;
+      background:
+        /* 顶部高光 */
+        radial-gradient(
+          ellipse at 50% 20%,
+          rgba(230, 210, 180, 0.25) 0%,
+          transparent 50%
+        ),
+        /* 金属米色渐变底色 */
+        linear-gradient(
+          180deg,
+          #c4b5a0 0%,
+          #a89888 50%,
+          #8a7a6a 100%
+        );
+      color: #3d322a;
+      cursor: pointer;
+      transition: all 0.1s ease;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      position: relative;
+      padding: 4px 0;
+      gap: 2px;
+      /* 内阴影营造凹陷金属质感 */
+      box-shadow:
+        inset 0 2px 4px rgba(255, 240, 210, 0.4),
+        inset 0 -2px 6px rgba(60, 45, 30, 0.35),
+        0 3px 6px rgba(0, 0, 0, 0.4);
+      font-weight: 700;
+      text-shadow: 0 1px 0 rgba(255, 240, 210, 0.3);
+    }
+    .num-btn .num-main {
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1;
+      color: #2a221c;
+    }
+    .num-btn .num-count {
+      font-size: 11px;
+      font-weight: 600;
+      color: #5a4a3a;
+      line-height: 1;
+    }
+    .num-btn:hover {
+      background:
+        radial-gradient(
+          ellipse at 50% 20%,
+          rgba(240, 220, 190, 0.35) 0%,
+          transparent 50%
+        ),
+        linear-gradient(
+          180deg,
+          #d4c5b0 0%,
+          #b8a898 50%,
+          #9a8a7a 100%
+        );
+      border-color: #7a6a5a;
+    }
+    .num-btn:active, .num-btn.active {
+      /* 按压效果：scale + 内阴影加深 */
+      transform: scale(0.92);
+      background:
+        radial-gradient(
+          ellipse at 50% 30%,
+          rgba(200, 180, 150, 0.3) 0%,
+          transparent 50%
+        ),
+        linear-gradient(
+          180deg,
+          #9a8a7a 0%,
+          #b0a090 40%,
+          #c0b0a0 100%
+        );
+      border-color: #5a4a3a;
+      box-shadow:
+        inset 0 3px 8px rgba(40, 30, 20, 0.5),
+        inset 0 -1px 2px rgba(255, 240, 210, 0.2),
+        0 1px 2px rgba(0, 0, 0, 0.3);
+      color: #1a1614;
+    }
+    .num-btn.completed {
+      opacity: 0.4;
+      pointer-events: none;
+      filter: grayscale(0.5);
+    }
+    /* 连填模式：被选中的数字变绿 —— 皮革主题下的铜绿色印章风格 */
+    .num-btn.quick-fill-num {
+      background:
+        radial-gradient(
+          ellipse at 50% 20%,
+          rgba(180, 230, 180, 0.4) 0%,
+          transparent 50%
+        ),
+        linear-gradient(135deg, #5a9a5a 0%, #3a7a3a 50%, #2a6a2a 100%) !important;
+      color: #f0f8e8 !important;
+      border-color: #2a5a2a !important;
+      box-shadow:
+        0 0 12px rgba(90, 154, 90, 0.5),
+        inset 0 2px 4px rgba(200, 240, 180, 0.3),
+        inset 0 -2px 4px rgba(20, 60, 20, 0.4),
+        0 3px 6px rgba(0, 0, 0, 0.4) !important;
+      transform: scale(0.92);
+      font-weight: 800;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+    .num-btn.quick-fill-num .num-main {
+      color: #f0f8e8 !important;
+    }
+    .num-btn.quick-fill-num .num-count {
+      color: #c8e0b0 !important;
+    }
+    /* 长按蓄力：铜绿色底 + 底部进度条 */
+    .num-btn.long-pressing {
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(
+          ellipse at 50% 20%,
+          rgba(180, 230, 180, 0.3) 0%,
+          transparent 50%
+        ),
+        linear-gradient(180deg, #7ab07a 0%, #5a9a5a 50%, #3a7a3a 100%) !important;
+      color: #f0f8e8 !important;
+      border-color: #3a6a3a !important;
+      font-weight: 800 !important;
+      transition: none;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+    .num-btn.long-pressing .num-main {
+      color: #f0f8e8 !important;
+    }
+    .num-btn.long-pressing::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 0%;
+      height: 4px;
+      /* 铜绿色进度条 */
+      background: linear-gradient(90deg, #4a9a4a, #7ac87a);
+      border-radius: 0 0 8px 8px;
+      animation: long-press-progress 0.65s ease-out forwards;
+      z-index: 1;
+    }
+    @keyframes long-press-progress {
+      0%   { width: 0%; }
+      100% { width: 100%; }
+    }
+    /* 连填模式提示 */
+    .quick-fill-hint {
+      text-align: center;
+      font-size: 11px;
+      color: #a8c890;
+      margin: 2px 0 4px;
+      padding: 0;
+      transition: opacity 0.3s ease;
+      opacity: 0;
+      height: 0;
+      overflow: hidden;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+    .quick-fill-hint.show {
+      opacity: 1;
+      height: 18px;
+    }
+    /* 竖屏小屏适配：保证按钮最小可点击尺寸 */
+    @media (orientation: portrait) and (max-width: 380px) {
+      #num-pad {
+        gap: 4px;
+      }
+      .num-btn {
+        height: 52px;
+        min-height: 50px;
+        border-radius: 8px;
+        padding: 3px 0;
+        gap: 1px;
+      }
+      .num-btn .num-main {
+        font-size: 22px;
+      }
+      .num-btn .num-count {
+        font-size: 10px;
+      }
+      #toolbar button {
+        height: 36px;
+        font-size: 14px;
+      }
+      #bottom-controls {
+        padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+        gap: 6px;
+      }
+    }
+    /* Toast */
+    .game-toast {
+      position: fixed;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(26,29,36,0.95);
+      color: #fbbf24;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+      z-index: 10000;
+      pointer-events: none;
+      border: 1px solid rgba(251,191,36,0.25);
+      backdrop-filter: blur(10px);
+      max-width: 85vw;
+      text-align: center;
+    }
+    .game-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    /* Multi-select indicator */
+    .multi-select-hint {
+      text-align: center;
+      font-size: 12px;
+      color: #c9a84c;
+      margin: 0;
+      height: 0;
+      overflow: hidden;
+      transition: height 0.2s ease, margin 0.2s ease;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+    .multi-select-hint.show {
+      height: 18px;
+      margin: 4px 0;
+    }
+    /* ===== 45法则顶部常驻 HUD —— 侦探案卷夹·笔记本页样式 ===== */
+    .rule45-banner {
+      /* 泛黄纸张底色 */
+      background-color: #f4ede4;
+      /* 横线格线纹理：淡蓝色细横线 + 左侧装订竖线 */
+      background-image:
+        repeating-linear-gradient(
+          to bottom,
+          transparent 0px,
+          transparent 21px,
+          rgba(139, 119, 101, 0.18) 21px,
+          rgba(139, 119, 101, 0.18) 22px
+        ),
+        linear-gradient(
+          to right,
+          rgba(180, 60, 60, 0.25) 0px,
+          rgba(180, 60, 60, 0.25) 1px,
+          transparent 1px,
+          transparent 100%
+        );
+      background-size: 100% 22px, 100% 100%;
+      background-position: 0 0, 28px 0;
+      /* 布局 */
+      margin: 6px 8px 4px;
+      padding: 10px 14px 10px 40px;
+      flex-shrink: 0;
+      width: calc(100% - 16px);
+      box-sizing: border-box;
+      position: relative;
+      /* 纸张边缘阴影 */
+      border-radius: 3px 8px 3px 3px;
+      box-shadow:
+        0 3px 10px rgba(0, 0, 0, 0.25),
+        inset 0 0 40px rgba(139, 119, 101, 0.08);
+      /* 墨迹色文字基础 */
+      color: #1a1614;
+      font-family: "Courier New", "Consolas", monospace;
+    }
+    /* 左侧装订孔：3个小黑点 */
+    .rule45-banner::before {
+      content: '';
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 6px;
+      height: calc(100% - 16px);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-around;
+      align-items: center;
+      pointer-events: none;
+    }
+    .rule45-banner::before {
+      /* 用径向渐变模拟3个装订孔 */
+      background:
+        radial-gradient(circle at 50% 20%, #2a221c 0%, #2a221c 2px, transparent 3px),
+        radial-gradient(circle at 50% 50%, #2a221c 0%, #2a221c 2px, transparent 3px),
+        radial-gradient(circle at 50% 80%, #2a221c 0%, #2a221c 2px, transparent 3px);
+      background-size: 6px 100%;
+      background-repeat: no-repeat;
+      content: '';
+    }
+    /* 右上角卷角阴影 */
+    .rule45-banner::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 20px;
+      height: 20px;
+      background: linear-gradient(
+        225deg,
+        rgba(139, 119, 101, 0.3) 0%,
+        rgba(139, 119, 101, 0.15) 45%,
+        transparent 50%
+      );
+      border-radius: 0 8px 0 0;
+      pointer-events: none;
+    }
+    .rule45-row-main {
+      display: flex;
+      justify-content: space-between;
+      /* 格线底部装饰：用虚线模拟钢笔下划线 */
+      border-bottom: 1px dashed rgba(26, 22, 20, 0.2);
+      padding-bottom: 6px;
+      margin-bottom: 6px;
+    }
+    .rule45-block {
+      flex: 1;
+      text-align: center;
+      position: relative;
+    }
+    .rule45-block:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      top: 15%;
+      height: 70%;
+      width: 1px;
+      /* 墨迹色竖分隔线 */
+      background: rgba(26, 22, 20, 0.15);
+    }
+    .r45-label {
+      font-size: 11px;
+      /* 深棕墨迹色 */
+      color: #5a4a3a;
+      margin-bottom: 2px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      font-family: "Courier New", "Consolas", monospace;
+    }
+    .r45-data {
+      font-size: 13px;
+      font-weight: 700;
+      /* 墨迹色 */
+      color: #1a1614;
+      font-family: "Courier New", "Consolas", monospace;
+    }
+    .r45-diff {
+      /* 棕灰色次要文字 */
+      color: #7a6a5a;
+      font-weight: 400;
+      font-size: 11px;
+      margin: 0 2px;
+      font-family: "Courier New", "Consolas", monospace;
+    }
+    .r45-remain {
+      /* 深墨绿色（代表"余量"），类似墨水批注色 */
+      color: #3a6b3a;
+      font-weight: 700;
+      font-size: 11px;
+      font-family: "Courier New", "Consolas", monospace;
+    }
+    .rule45-row-cage {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px;
+      font-size: 12px;
+    }
+    .r45-cage-title {
+      /* 深棕色标题，类似钢笔加粗 */
+      color: #5a3a1a;
+      font-weight: bold;
+      flex-shrink: 0;
+      font-family: "Courier New", "Consolas", monospace;
+      letter-spacing: 0.5px;
+    }
+    .r45-combo-pill {
+      /* 便签纸风格背景 */
+      background: rgba(255, 248, 230, 0.7);
+      border: 1px solid rgba(139, 119, 101, 0.3);
+      border-radius: 3px;
+      padding: 1px 6px;
+      font-size: 11px;
+      /* 墨迹色 */
+      color: #1a1614;
+      font-family: "Courier New", "Consolas", monospace;
+      white-space: nowrap;
+      /* 轻微便签倾斜效果 */
+      transform: rotate(-0.5deg);
+    }
+
+    /* ========== 右侧浮条（皮包拉扣风格） ========== */
+    .right-floating-bar {
+      position: fixed;
+      right: 0;
+      bottom: 80px;
+      z-index: 100;
+      pointer-events: none;
+      touch-action: none;
+      display: flex;
+      align-items: flex-end;
+    }
+
+    /* 拉扣头（金属圆形扣） */
+    .float-bar-tab {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(145deg, #8a7a5a, #6a5a4a);
+      border: 1.5px solid #c9a84c;
+      border-radius: 50% 0 0 50%;
+      pointer-events: auto;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow:
+        -2px 0 8px rgba(0, 0, 0, 0.4),
+        inset 1px 1px 3px rgba(255, 230, 180, 0.4),
+        inset -1px -1px 2px rgba(0, 0, 0, 0.3);
+      transition: all 0.2s ease;
+      position: relative;
+      z-index: 2;
+      touch-action: none;
+      flex-shrink: 0;
+    }
+    .float-bar-tab:hover {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(145deg, #a08d68, #7a6a58);
+      box-shadow:
+        -3px 0 12px rgba(0, 0, 0, 0.5),
+        inset 1px 1px 4px rgba(255, 230, 180, 0.5),
+        inset -1px -1px 2px rgba(0, 0, 0, 0.3);
+    }
+    .float-bar-tab:active {
+      transform: translateX(2px);
+    }
+    .float-bar-tab-icon {
+      color: #2a2015;
+      font-size: 14px;
+      text-shadow: 0 1px 0 rgba(255, 220, 150, 0.3);
+    }
+    .float-bar-tab-badge {
+      position: absolute;
+      top: -4px;
+      left: -4px;
+      min-width: 16px;
+      height: 16px;
+      background: #b91c1c;
+      color: #fef3c7;
+      font-size: 10px;
+      font-weight: 700;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 4px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+      border: 1px solid #8a7a5a;
+    }
+
+    /* 快照面板（皮革抽屉式） */
+    .float-bar-panel {
+      width: 0;
+      overflow: hidden;
+      background: rgba(40, 35, 30, 0.92);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1.5px solid #8a7a5a;
+      border-right: none;
+      border-radius: 10px 0 0 10px;
+      padding: 0;
+      box-sizing: border-box;
+      pointer-events: none;
+      transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                  padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      touch-action: none;
+      height: auto;
+      /* 皮革纹理 */
+      background-image:
+        radial-gradient(ellipse at 20% 30%, rgba(201, 168, 76, 0.05) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 70%, rgba(138, 122, 90, 0.08) 0%, transparent 50%);
+    }
+    .float-bar-panel::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      /* 缝线效果 */
+      border-left: 1px dashed rgba(201, 168, 76, 0.2);
+      margin: 4px 0 4px 4px;
+      border-radius: 8px 0 0 8px;
+    }
+    .right-floating-bar.panel-open .float-bar-panel {
+      width: 88px;
+      padding: 10px 6px;
+      pointer-events: auto;
+    }
+    .float-bar-panel > * {
+      opacity: 0;
+      transition: opacity 0.2s ease 0.1s;
+      pointer-events: none;
+    }
+    .right-floating-bar.panel-open .float-bar-panel > * {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* 提示进度指示器（侦探风格） */
+    .hint-progress {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 4px;
+    }
+    .hint-progress-icon {
+      font-size: 18px;
+      animation: hint-spin 1.5s linear infinite;
+      filter: drop-shadow(0 0 4px rgba(201, 168, 76, 0.4));
+    }
+    @keyframes hint-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .hint-progress-text {
+      font-size: 10px;
+      color: #c4b5a0;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.5px;
+    }
+
+    /* What If 快照堆叠（侦探照片堆叠） */
+    .whatif-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      width: 100%;
+      position: relative;
+      padding-top: 4px;
+    }
+    .snapshot-cards {
+      position: relative;
+      width: 56px;
+      height: 120px; /* 3张卡片堆叠高度，每张偏移 4px */
+    }
+    .snapshot-card {
+      position: absolute;
+      width: 56px;
+      height: 56px;
+      background: rgba(50, 42, 35, 0.95);
+      border: 1.5px solid #6b5b4a;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow: hidden;
+      box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 230, 180, 0.1);
+    }
+    /* 照片堆叠效果：每张偏移 4-8px，像一叠照片 */
+    .snapshot-card:nth-child(1) {
+      top: 0; z-index: 1;
+      transform: translateY(0) rotate(-2deg);
+    }
+    .snapshot-card:nth-child(2) {
+      top: 24px; z-index: 2;
+      transform: translateY(0) rotate(1.5deg);
+    }
+    .snapshot-card:nth-child(3) {
+      top: 48px; z-index: 3;
+      transform: translateY(0) rotate(-1deg);
+    }
+    /* 悬停时整体展开一点 */
+    .snapshot-cards:hover .snapshot-card:nth-child(1) { top: 0; transform: rotate(-3deg); }
+    .snapshot-cards:hover .snapshot-card:nth-child(2) { top: 30px; transform: rotate(2deg); }
+    .snapshot-cards:hover .snapshot-card:nth-child(3) { top: 60px; transform: rotate(-1.5deg); }
+    .snapshot-card:hover {
+      border-color: #c9a84c;
+      box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.5),
+        0 0 8px rgba(201, 168, 76, 0.3),
+        inset 0 1px 0 rgba(255, 230, 180, 0.2);
+      z-index: 10 !important;
+    }
+    .snapshot-card.active {
+      border-color: #c9a84c;
+      box-shadow:
+        0 0 12px rgba(201, 168, 76, 0.5),
+        0 2px 8px rgba(0, 0, 0, 0.4),
+        inset 0 0 0 1px rgba(201, 168, 76, 0.3);
+      animation: snapshot-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes snapshot-pulse {
+      0%, 100% { box-shadow: 0 0 6px rgba(201, 168, 76, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3); }
+      50% { box-shadow: 0 0 16px rgba(201, 168, 76, 0.7), 0 2px 8px rgba(0, 0, 0, 0.3); }
+    }
+    .snapshot-card canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .snapshot-label {
+      position: absolute;
+      bottom: 2px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 9px;
+      color: #d4c5b0;
+      white-space: nowrap;
+      font-family: "JetBrains Mono", monospace;
+      background: rgba(30, 25, 20, 0.85);
+      padding: 0 4px;
+      border-radius: 2px;
+      pointer-events: none;
+      border: 1px solid rgba(201, 168, 76, 0.2);
+    }
+    .snapshot-index {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 14px;
+      height: 14px;
+      background: rgba(40, 35, 30, 0.9);
+      color: #8a7a6a;
+      font-size: 9px;
+      font-weight: 700;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      border: 1px solid rgba(138, 122, 90, 0.4);
+    }
+    .snapshot-card.active .snapshot-index {
+      background: #c9a84c;
+      color: #2a2015;
+      border-color: #c9a84c;
+    }
+
+    /* What If 操作按钮（侦探案卷风格） */
+    .whatif-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      width: 100%;
+      margin-top: 4px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(138, 122, 90, 0.4);
+    }
+    .whatif-btn {
+      width: 100%;
+      height: 28px;
+      border: 1px solid rgba(138, 122, 90, 0.5);
+      background: rgba(50, 42, 35, 0.8);
+      color: #c4b5a0;
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.5px;
+    }
+    .whatif-btn:hover {
+      background: rgba(61, 50, 42, 0.9);
+      border-color: rgba(201, 168, 76, 0.4);
+    }
+    .whatif-btn:active {
+      transform: scale(0.95);
+    }
+    .whatif-accept {
+      background: rgba(34, 139, 68, 0.2);
+      border-color: rgba(34, 139, 68, 0.5);
+      color: #4ade80;
+    }
+    .whatif-accept:hover {
+      background: rgba(34, 139, 68, 0.35);
+      border-color: rgba(74, 222, 128, 0.6);
+      box-shadow: 0 0 8px rgba(34, 197, 94, 0.2);
+    }
+    .whatif-undo {
+      background: rgba(185, 28, 28, 0.15);
+      border-color: rgba(185, 28, 28, 0.4);
+      color: #f87171;
+    }
+    .whatif-undo:hover {
+      background: rgba(185, 28, 28, 0.25);
+      border-color: rgba(248, 113, 113, 0.5);
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.15);
+    }
+    .whatif-reset {
+      background: rgba(107, 91, 74, 0.3);
+      border-color: rgba(107, 91, 74, 0.6);
+      color: #a8a090;
+      font-size: 11px;
+    }
+    .whatif-reset:hover {
+      background: rgba(138, 122, 90, 0.35);
+      border-color: rgba(138, 122, 90, 0.8);
+    }
+
+    /* 浮动提示入口按钮（侦探风格） */
+    .floating-hint-entry {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .floating-hint-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(201, 168, 76, 0.15);
+      border: 1px solid rgba(201, 168, 76, 0.4);
+      color: #c9a84c;
+      font-size: 18px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: inset 0 1px 2px rgba(255, 230, 180, 0.2);
+    }
+    .floating-hint-btn:hover {
+      background: rgba(201, 168, 76, 0.25);
+      transform: scale(1.05);
+      box-shadow: 0 0 10px rgba(201, 168, 76, 0.3);
+    }
+
+    /* What If 模式棋盘边框（侦探风格） */
+    .whatif-mode #board-area {
+      box-shadow: 0 0 30px rgba(201, 168, 76, 0.25);
+      border-radius: 8px;
+    }
+    .whatif-mode #level-title {
+      color: #c9a84c;
+    }
+    .whatif-mode #level-title::before {
+      content: "🧪 假设模式 · ";
+      font-size: 11px;
+    }
+
+    /* 小屏适配（<480px）侦探风格 */
+    @media (max-width: 480px) {
+      .right-floating-bar {
+        bottom: 70px;
+      }
+      .float-bar-tab {
+        width: 28px;
+        height: 28px;
+      }
+      .float-bar-tab:hover {
+        width: 32px;
+        height: 32px;
+      }
+      .float-bar-tab-icon {
+        font-size: 12px;
+      }
+      .right-floating-bar.panel-open .float-bar-panel {
+        width: 72px;
+        padding: 8px 4px;
+      }
+      .snapshot-cards {
+        width: 44px;
+        height: 100px;
+      }
+      .snapshot-card {
+        width: 44px;
+        height: 44px;
+      }
+      .snapshot-card:nth-child(1) { top: 0; }
+      .snapshot-card:nth-child(2) { top: 20px; }
+      .snapshot-card:nth-child(3) { top: 40px; }
+      .snapshot-cards:hover .snapshot-card:nth-child(2) { top: 24px; }
+      .snapshot-cards:hover .snapshot-card:nth-child(3) { top: 48px; }
+      .snapshot-label {
+        font-size: 8px;
+      }
+      .whatif-btn {
+        height: 24px;
+        font-size: 11px;
+      }
+    }
+
+    /* Landscape controls wrapper (no effect in portrait) */
+    .landscape-controls {
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    /* 横屏关卡标题 */
+    .landscape-level-title {
+      display: none;
+      width: 100%;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: #e8eaed;
+      margin-bottom: 4px;
+      padding: 4px 0;
+    }
+    @media (orientation: landscape) and (max-height: 520px) {
+      .landscape-level-title {
+        display: block;
+        order: 0;
+      }
+    }
+    /* Boss战预警边缘红光 */
+    #boss-warning-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 12000;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      box-shadow: inset 0 0 80px 20px rgba(239, 68, 68, 0.6);
+    }
+    #boss-warning-overlay.show {
+      opacity: 1;
+      animation: bossWarningPulse 0.5s ease-in-out 2;
+    }
+    @keyframes bossWarningPulse {
+      0%, 100% { opacity: 0.5; }
+      50% { opacity: 1; }
+    }
+    /* Boss战HUD - 顶部浮动条，含头像/进度条/功能按钮 */
+    #boss-battle-hud {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      width: calc(100% - 24px);
+      max-width: 340px;
+      margin: 0 auto;
+      padding: 6px 10px;
+      background: rgba(15, 23, 42, 0.9);
+      border-radius: 10px;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      backdrop-filter: blur(10px);
+      flex-shrink: 0;
+      box-shadow: 0 4px 16px rgba(239, 68, 68, 0.2);
+      position: relative;
+    }
+    #boss-battle-hud.visible {
+      display: flex;
+    }
+    .boss-hud-top-row {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      gap: 8px;
+    }
+    /* Boss头像 */
+    .boss-hud-portrait-wrap {
+      position: relative;
+      width: 36px;
+      height: 36px;
+      flex-shrink: 0;
+    }
+    .boss-hud-portrait {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid rgba(239, 68, 68, 0.6);
+    }
+    .boss-hud-portrait-ring {
+      position: absolute;
+      top: -3px;
+      left: -3px;
+      right: -3px;
+      bottom: -3px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      border-top-color: rgba(239, 68, 68, 0.8);
+      border-right-color: rgba(239, 68, 68, 0.4);
+      animation: bossPortraitSpin 3s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes bossPortraitSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    /* 中间区域 */
+    .boss-hud-center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .boss-hud-title {
+      font-size: 8px;
+      color: #ef4444;
+      letter-spacing: 1.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+    .boss-hud-bars {
+      display: flex;
+      width: 100%;
+      gap: 6px;
+      align-items: center;
+    }
+    .boss-hud-bar {
+      flex: 1;
+      height: 4px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+    }
+    .boss-hud-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    .boss-hud-bar-fill.player {
+      background: linear-gradient(90deg, #22c55e, #4ade80);
+      box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+    }
+    .boss-hud-bar-fill.ai {
+      background: linear-gradient(90deg, #ef4444, #f87171);
+      box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+    }
+    .boss-hud-scores {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      font-size: 10px;
+      line-height: 1;
+      margin-top: 2px;
+      font-family: 'Courier New', monospace;
+      font-weight: 600;
+    }
+    .boss-hud-score-player {
+      color: #22c55e;
+    }
+    .boss-hud-score-ai {
+      color: #ef4444;
+    }
+    .boss-hud-labels {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      font-size: 9px;
+      line-height: 1;
+    }
+    .boss-hud-label-player {
+      color: #22c55e;
+      font-weight: 600;
+    }
+    .boss-hud-label-boss {
+      color: #ef4444;
+      font-weight: 600;
+    }
+    /* 右侧操作按钮 */
+    .boss-hud-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .boss-hud-btn {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.05);
+      color: rgba(255,255,255,0.7);
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: all 0.2s ease;
+    }
+    .boss-hud-btn:hover {
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      transform: scale(1.05);
+    }
+    .boss-hud-btn:active {
+      transform: scale(0.95);
+    }
+    /* 难度选择面板 */
+    .boss-difficulty-panel {
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 10px;
+      margin-top: 6px;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 8px 12px;
+      z-index: 100;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      backdrop-filter: blur(10px);
+    }
+    .boss-difficulty-panel.show {
+      display: block;
+      animation: diffPanelFadeIn 0.2s ease;
+    }
+    @keyframes diffPanelFadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .boss-difficulty-title {
+      font-size: 10px;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 6px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    .boss-difficulty-options {
+      display: flex;
+      gap: 4px;
+    }
+    .boss-diff-btn {
+      padding: 4px 10px;
+      border-radius: 5px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.03);
+      color: rgba(255,255,255,0.6);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .boss-diff-btn:hover {
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+    }
+    .boss-diff-btn.active {
+      background: linear-gradient(135deg, #ef4444, #f97316);
+      color: #fff;
+      border-color: transparent;
+      font-weight: 600;
+    }
+
+    /* ===== 对战结算面板 ===== */
+    #battle-result-overlay #battle-result-card {
+      transform: scale(0.95);
+      opacity: 0;
+      transition: all 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    #battle-result-overlay.show #battle-result-card {
+      transform: scale(1);
+      opacity: 1;
+    }
+    #btn-battle-retry:hover {
+      background: rgba(255,255,255,0.15) !important;
+      transform: translateY(-1px);
+    }
+    #btn-battle-retry:active {
+      transform: translateY(0);
+    }
+    #btn-battle-back:hover {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+    }
+    #btn-battle-back:active {
+      transform: translateY(0);
+    }
+
+    /* ===== 通关高潮动画：破案印章 ===== */
+    #climax-overlay {
+      pointer-events: none;
+    }
+    /* 步骤1：毛玻璃从中心扩散 */
+    #climax-frosted.climax-step1 {
+      animation: climaxFrostedSpread 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    @keyframes climaxFrostedSpread {
+      0% {
+        opacity: 0;
+        backdrop-filter: blur(0px);
+        -webkit-backdrop-filter: blur(0px);
+        clip-path: circle(0% at 50% 50%);
+      }
+      100% {
+        opacity: 1;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        clip-path: circle(100% at 50% 50%);
+      }
+    }
+    /* 步骤2：印章砸下（弹性效果） */
+    #climax-stamp.climax-step2 {
+      animation: climaxStampSlam 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    @keyframes climaxStampSlam {
+      0% {
+        opacity: 0;
+        transform: translate(-50%, -120%) scale(3) rotate(-15deg);
+      }
+      60% {
+        opacity: 1;
+        transform: translate(-50%, -45%) scale(0.9) rotate(-8deg);
+      }
+      75% {
+        transform: translate(-50%, -55%) scale(1.05) rotate(-3deg);
+      }
+      90% {
+        transform: translate(-50%, -48%) scale(0.98) rotate(-1deg);
+      }
+      100% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1) rotate(0deg);
+      }
+    }
+    /* 印章砸下时的震动 */
+    #climax-overlay.climax-shake {
+      animation: climaxShake 0.3s ease;
+    }
+    @keyframes climaxShake {
+      0%, 100% { transform: translate(0, 0); }
+      20% { transform: translate(-4px, 3px); }
+      40% { transform: translate(3px, -2px); }
+      60% { transform: translate(-2px, 2px); }
+      80% { transform: translate(2px, -3px); }
+    }
+    /* 步骤3：毛玻璃碎裂消散 */
+    #climax-frosted.climax-step3 {
+      animation: climaxGlassShatter 0.5s ease-out forwards;
+    }
+    @keyframes climaxGlassShatter {
+      0% {
+        opacity: 1;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+      100% {
+        opacity: 0;
+        backdrop-filter: blur(0px);
+        -webkit-backdrop-filter: blur(0px);
+      }
+    }
+    /* 玻璃碎片飞散 */
+    .climax-shard {
+      position: absolute;
+      background: rgba(200, 210, 230, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      pointer-events: none;
+    }
+    .climax-shard.animate {
+      animation: climaxShardFly 0.6s ease-out forwards;
+    }
+    @keyframes climaxShardFly {
+      0% {
+        opacity: 1;
+        transform: translate(0, 0) rotate(0deg) scale(1);
+      }
+      100% {
+        opacity: 0;
+        transform: translate(var(--sx), var(--sy)) rotate(var(--sr)) scale(0.3);
+      }
+    }
+    /* 步骤4：印章淡出（给结算面板让位置） */
+    #climax-stamp.climax-step4 {
+      animation: climaxStampFade 0.5s ease-in forwards;
+    }
+    @keyframes climaxStampFade {
+      0% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+      }
+      100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.8);
+      }
+    }
+
+    /* ===== 提示解说气泡（Narration Bubble） ===== */
+    .hint-narration-bubble {
+      position: absolute;
+      top: -8px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-10px);
+      min-width: 200px;
+      max-width: calc(100% - 24px);
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(251, 191, 36, 0.35);
+      border-radius: 12px;
+      padding: 10px 14px 10px 12px;
+      z-index: 500;
+      box-shadow: 0 4px 20px rgba(251, 191, 36, 0.15),
+                  0 2px 8px rgba(0, 0, 0, 0.4);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .hint-narration-bubble.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .hint-narration-bubble::after {
+      content: '';
+      position: absolute;
+      bottom: -7px;
+      left: 50%;
+      transform: translateX(-50%) rotate(45deg);
+      width: 12px;
+      height: 12px;
+      background: rgba(15, 23, 42, 0.88);
+      border-right: 1px solid rgba(251, 191, 36, 0.35);
+      border-bottom: 1px solid rgba(251, 191, 36, 0.35);
+      backdrop-filter: blur(12px);
+    }
+    .hint-narration-avatar {
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(15, 23, 42, 0.8));
+      border: 1px solid rgba(251, 191, 36, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+    .hint-narration-content {
+      flex: 1;
+      min-width: 0;
+    }
+    .hint-narration-tech {
+      font-size: 10px;
+      color: #fbbf24;
+      font-weight: 700;
+      letter-spacing: 1px;
+      margin-bottom: 3px;
+      opacity: 0.9;
+    }
+    .hint-narration-text {
+      font-size: 13px;
+      color: #e2e8f0;
+      line-height: 1.5;
+      word-break: break-word;
+      font-weight: 500;
+    }
+    .hint-narration-text .cursor {
+      display: inline-block;
+      width: 2px;
+      height: 1em;
+      background: #fbbf24;
+      margin-left: 2px;
+      vertical-align: text-bottom;
+      animation: narration-blink 0.8s step-end infinite;
+    }
+    @keyframes narration-blink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0; }
+    }
+    .hint-narration-step-badge {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      background: linear-gradient(135deg, #fbbf24, #f59e0b);
+      color: #0f172a;
+      font-size: 10px;
+      font-weight: 800;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 6px rgba(251, 191, 36, 0.4);
+    }
+    /* 横屏模式下的解说气泡位置调整 */
+    @media (orientation: landscape) and (max-height: 520px) {
+      .hint-narration-bubble {
+        top: -4px;
+      }
+    }
+
+    /* ===== PC 双栏布局 ===== */
+    #pc-workspace {
+      display: none;
+    }
+
+    /* 双栏模式：宽度 ≥ 768px 且横屏 */
+    @media (min-width: 768px) and (orientation: landscape) {
+      /* 隐藏移动端布局 */
+      #game-container {
+        display: none !important;
+      }
+
+      /* 显示 PC 双栏工作区 */
+      #pc-workspace {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        position: relative;
+        z-index: 1;
+        overflow: hidden;
+      }
+
+      /* 隐藏右侧浮条（移动端/旧横屏用） */
+      .right-floating-bar {
+        display: none !important;
+      }
+
+      /* ===== 左侧战区 ===== */
+      #pc-left-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 20px;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      #pc-board-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        width: 100%;
+        min-height: 0;
+      }
+
+      #pc-board-container #gameCanvas {
+        width: auto !important;
+        max-width: 100%;
+        max-height: calc(100vh - 180px);
+        aspect-ratio: 1;
+      }
+
+      #pc-board-container #long-press-halo {
+        display: none;
+      }
+
+      /* PC 模式下通关高潮动画：限制在棋盘区域内 */
+      #pc-board-container #climax-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #pc-board-container #climax-overlay #climax-stamp svg {
+        width: 120px;
+        height: 120px;
+      }
+      #pc-board-container .climax-shard {
+        background: rgba(200, 210, 230, 0.5);
+      }
+
+      /* PC 端控制区 */
+      #pc-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        max-width: 560px;
+        flex-shrink: 0;
+      }
+
+      /* PC 端数字键盘 */
+      #pc-num-pad {
+        display: grid;
+        grid-template-columns: repeat(9, 1fr);
+        gap: 6px;
+        width: 100%;
+        justify-items: center;
+      }
+
+      #pc-num-pad .num-btn {
+        width: 100%;
+        height: 52px;
+        min-height: 48px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid #6a5a4a;
+        border-radius: 8px;
+        background:
+          radial-gradient(ellipse at 50% 20%, rgba(230, 210, 180, 0.25) 0%, transparent 50%),
+          linear-gradient(180deg, #c4b5a0 0%, #a89888 50%, #8a7a6a 100%);
+        color: #3d322a;
+        cursor: pointer;
+        transition: all 0.1s ease;
+        user-select: none;
+        position: relative;
+        padding: 2px 0;
+        gap: 2px;
+        box-shadow:
+          inset 0 2px 4px rgba(255, 240, 210, 0.4),
+          inset 0 -2px 6px rgba(60, 45, 30, 0.35),
+          0 3px 6px rgba(0, 0, 0, 0.4);
+        font-weight: 700;
+        text-shadow: 0 1px 0 rgba(255, 240, 210, 0.3);
+      }
+
+      #pc-num-pad .num-btn .num-main {
+        font-size: 22px;
+        font-weight: 800;
+        line-height: 1;
+        color: #2a221c;
+      }
+
+      #pc-num-pad .num-btn .num-count {
+        font-size: 10px;
+        font-weight: 600;
+        color: #5a4a3a;
+        line-height: 1;
+      }
+
+      #pc-num-pad .num-btn:hover {
+        background:
+          radial-gradient(ellipse at 50% 20%, rgba(240, 220, 190, 0.35) 0%, transparent 50%),
+          linear-gradient(180deg, #d4c5b0 0%, #b8a898 50%, #9a8a7a 100%);
+        border-color: #7a6a5a;
+      }
+
+      #pc-num-pad .num-btn:active,
+      #pc-num-pad .num-btn.active {
+        transform: scale(0.92);
+        background:
+          radial-gradient(ellipse at 50% 30%, rgba(200, 180, 150, 0.3) 0%, transparent 50%),
+          linear-gradient(180deg, #9a8a7a 0%, #b0a090 40%, #c0b0a0 100%);
+        border-color: #5a4a3a;
+        box-shadow:
+          inset 0 3px 8px rgba(40, 30, 20, 0.5),
+          inset 0 -1px 2px rgba(255, 240, 210, 0.2),
+          0 1px 2px rgba(0, 0, 0, 0.3);
+      }
+
+      #pc-num-pad .num-btn.completed {
+        opacity: 0.4;
+        pointer-events: none;
+        filter: grayscale(0.5);
+      }
+
+      /* PC 端工具栏 */
+      #pc-toolbar {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+      }
+
+      #pc-toolbar button {
+        flex: 1;
+        height: 44px;
+        background:
+          linear-gradient(180deg, rgba(60, 48, 38, 0.9) 0%, rgba(45, 36, 28, 0.95) 100%);
+        border: 1.5px solid #8a7a5a;
+        border-bottom: 3px solid #5a4a3a;
+        color: #c4b5a0;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.12s ease;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 230, 180, 0.1),
+          0 2px 4px rgba(0, 0, 0, 0.3);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      }
+
+      #pc-toolbar button:hover {
+        background:
+          linear-gradient(180deg, rgba(75, 60, 48, 0.95) 0%, rgba(55, 44, 34, 0.98) 100%);
+        color: #e8dcc8;
+        border-color: #a09070;
+      }
+
+      #pc-toolbar button:active {
+        transform: translateY(2px);
+        border-bottom-width: 1px;
+        box-shadow:
+          inset 0 1px 2px rgba(0, 0, 0, 0.3),
+          0 0 2px rgba(0, 0, 0, 0.2);
+      }
+
+      #pc-toolbar button.active {
+        background:
+          linear-gradient(180deg, rgba(90, 70, 40, 0.95) 0%, rgba(65, 50, 28, 0.98) 100%);
+        border-color: #c9a84c;
+        border-bottom-color: #8a7030;
+        color: #f0d890;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 230, 150, 0.2),
+          0 0 8px rgba(201, 168, 76, 0.3),
+          0 2px 4px rgba(0, 0, 0, 0.3);
+      }
+
+      /* ===== 右侧功能舱 ===== */
+      #pc-right-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        width: 280px;
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+        flex-shrink: 0;
+        /* 皮革纹理背景 */
+        background:
+          repeating-linear-gradient(
+            45deg,
+            transparent 0px,
+            transparent 3px,
+            rgba(0, 0, 0, 0.04) 3px,
+            rgba(0, 0, 0, 0.04) 4px
+          ),
+          radial-gradient(
+            ellipse at 50% 0%,
+            rgba(120, 95, 70, 0.4) 0%,
+            transparent 60%
+          ),
+          #3d322a;
+        border-left: 2px solid #2a221c;
+        position: relative;
+        padding: 16px 14px;
+        box-sizing: border-box;
+      }
+
+      /* 右侧功能舱宽度响应式 */
+      @media (min-width: 1024px) and (orientation: landscape) {
+        #pc-right-panel {
+          width: 320px;
+        }
+      }
+
+      @media (min-width: 1280px) and (orientation: landscape) {
+        #pc-right-panel {
+          width: 380px;
+        }
+      }
+
+      /* 面板分隔线 */
+      .pc-panel-divider {
+        height: 1px;
+        background: linear-gradient(
+          to right,
+          transparent 0%,
+          rgba(201, 168, 76, 0.3) 20%,
+          rgba(201, 168, 76, 0.3) 80%,
+          transparent 100%
+        );
+        margin: 14px 0;
+        flex-shrink: 0;
+      }
+
+      /* 面板标题 */
+      .pc-panel-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: #c9a84c;
+        margin-bottom: 10px;
+        letter-spacing: 1px;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .pc-panel-title.leather-title {
+        color: #f0d890;
+      }
+
+      /* ===== 45法则笔记本面板（纸张风格） ===== */
+      .pc-notebook-panel {
+        flex-shrink: 0;
+      }
+
+      .pc-rule45-body {
+        background-color: #f4ede4;
+        background-image:
+          repeating-linear-gradient(
+            to bottom,
+            transparent 0px,
+            transparent 21px,
+            rgba(139, 119, 101, 0.18) 21px,
+            rgba(139, 119, 101, 0.18) 22px
+          ),
+          linear-gradient(
+            to right,
+            rgba(180, 60, 60, 0.25) 0px,
+            rgba(180, 60, 60, 0.25) 1px,
+            transparent 1px,
+            transparent 100%
+          );
+        background-size: 100% 22px, 100% 100%;
+        background-position: 0 0, 28px 0;
+        padding: 12px 14px 12px 40px;
+        position: relative;
+        border-radius: 3px 8px 3px 3px;
+        box-shadow:
+          0 3px 10px rgba(0, 0, 0, 0.25),
+          inset 0 0 40px rgba(139, 119, 101, 0.08);
+        color: #1a1614;
+        font-family: "Courier New", "Consolas", monospace;
+      }
+
+      .pc-rule45-body::before {
+        content: '';
+        position: absolute;
+        left: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 6px;
+        height: calc(100% - 16px);
+        background:
+          radial-gradient(circle at 50% 20%, #2a221c 0%, #2a221c 2px, transparent 3px),
+          radial-gradient(circle at 50% 50%, #2a221c 0%, #2a221c 2px, transparent 3px),
+          radial-gradient(circle at 50% 80%, #2a221c 0%, #2a221c 2px, transparent 3px);
+        background-size: 6px 100%;
+        background-repeat: no-repeat;
+        pointer-events: none;
+      }
+
+      .pc-rule45-body::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 20px;
+        height: 20px;
+        background: linear-gradient(
+          225deg,
+          rgba(139, 119, 101, 0.3) 0%,
+          rgba(139, 119, 101, 0.15) 45%,
+          transparent 50%
+        );
+        border-radius: 0 8px 0 0;
+        pointer-events: none;
+      }
+
+      .pc-rule45-body .rule45-row-main {
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 1px dashed rgba(26, 22, 20, 0.2);
+        padding-bottom: 6px;
+        margin-bottom: 6px;
+      }
+
+      .pc-rule45-body .rule45-block {
+        flex: 1;
+        text-align: center;
+        position: relative;
+      }
+
+      .pc-rule45-body .rule45-block:not(:last-child)::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        top: 15%;
+        height: 70%;
+        width: 1px;
+        background: rgba(26, 22, 20, 0.15);
+      }
+
+      .pc-rule45-body .r45-label {
+        font-size: 10px;
+        color: #5a4a3a;
+        margin-bottom: 2px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        font-family: "Courier New", "Consolas", monospace;
+      }
+
+      .pc-rule45-body .r45-data {
+        font-size: 12px;
+        font-weight: 700;
+        color: #1a1614;
+        font-family: "Courier New", "Consolas", monospace;
+      }
+
+      .pc-rule45-body .r45-diff {
+        color: #7a6a5a;
+        font-weight: 400;
+        font-size: 10px;
+        margin: 0 2px;
+      }
+
+      .pc-rule45-body .r45-remain {
+        color: #3a6b3a;
+        font-weight: 700;
+        font-size: 10px;
+      }
+
+      .pc-rule45-body .rule45-row-cage {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+        font-size: 11px;
+      }
+
+      .pc-rule45-body .r45-cage-title {
+        color: #5a3a1a;
+        font-weight: bold;
+        flex-shrink: 0;
+        font-family: "Courier New", "Consolas", monospace;
+        letter-spacing: 0.5px;
+      }
+
+      .pc-rule45-body .r45-combo-pill {
+        background: rgba(255, 248, 230, 0.7);
+        border: 1px solid rgba(139, 119, 101, 0.3);
+        border-radius: 3px;
+        padding: 1px 6px;
+        font-size: 10px;
+        color: #1a1614;
+        font-family: "Courier New", "Consolas", monospace;
+        white-space: nowrap;
+        transform: rotate(-0.5deg);
+      }
+
+      /* ===== What If 快照面板（皮革风格） ===== */
+      .pc-leather-panel {
+        flex-shrink: 0;
+      }
+
+      .pc-whatif-count {
+        font-size: 11px;
+        font-weight: 500;
+        color: #a89888;
+        letter-spacing: 0.5px;
+      }
+
+      /* PC 端快照卡片 */
+      .pc-whatif-snapshots {
+        margin-bottom: 12px;
+      }
+
+      .pc-snapshot-cards {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .pc-snapshot-card {
+        width: 72px;
+        height: 72px;
+        background: rgba(50, 42, 35, 0.95);
+        border: 1.5px solid #6b5b4a;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        overflow: hidden;
+        position: relative;
+        box-shadow:
+          0 2px 8px rgba(0, 0, 0, 0.4),
+          inset 0 1px 0 rgba(255, 230, 180, 0.1);
+      }
+
+      .pc-snapshot-card:hover {
+        border-color: #c9a84c;
+        box-shadow:
+          0 4px 12px rgba(0, 0, 0, 0.5),
+          0 0 8px rgba(201, 168, 76, 0.3),
+          inset 0 1px 0 rgba(255, 230, 180, 0.2);
+        transform: translateY(-2px);
+      }
+
+      .pc-snapshot-card.active {
+        border-color: #c9a84c;
+        box-shadow:
+          0 0 12px rgba(201, 168, 76, 0.5),
+          0 2px 8px rgba(0, 0, 0, 0.4),
+          inset 0 0 0 1px rgba(201, 168, 76, 0.3);
+        animation: pc-snapshot-pulse 1.5s ease-in-out infinite;
+      }
+
+      @keyframes pc-snapshot-pulse {
+        0%, 100% { box-shadow: 0 0 6px rgba(201, 168, 76, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3); }
+        50% { box-shadow: 0 0 16px rgba(201, 168, 76, 0.7), 0 2px 8px rgba(0, 0, 0, 0.3); }
+      }
+
+      .pc-snapshot-card canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      .pc-snapshot-card .snapshot-label {
+        position: absolute;
+        bottom: 2px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 9px;
+        color: #d4c5b0;
+        white-space: nowrap;
+        font-family: "JetBrains Mono", monospace;
+        background: rgba(30, 25, 20, 0.85);
+        padding: 0 4px;
+        border-radius: 2px;
+        pointer-events: none;
+        border: 1px solid rgba(201, 168, 76, 0.2);
+      }
+
+      .pc-snapshot-card .snapshot-index {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        width: 16px;
+        height: 16px;
+        background: rgba(40, 35, 30, 0.9);
+        color: #8a7a6a;
+        font-size: 10px;
+        font-weight: 700;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        border: 1px solid rgba(138, 122, 90, 0.4);
+      }
+
+      .pc-snapshot-card.active .snapshot-index {
+        background: #c9a84c;
+        color: #2a2015;
+        border-color: #c9a84c;
+      }
+
+      /* What If 操作按钮 */
+      .pc-whatif-actions {
+        display: flex;
+        gap: 6px;
+        width: 100%;
+      }
+
+      .pc-whatif-btn {
+        flex: 1;
+        height: 32px;
+        border: 1px solid rgba(138, 122, 90, 0.5);
+        background: rgba(50, 42, 35, 0.8);
+        color: #c4b5a0;
+        border-radius: 5px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        letter-spacing: 0.5px;
+        gap: 2px;
+      }
+
+      .pc-whatif-btn:hover {
+        background: rgba(61, 50, 42, 0.9);
+        border-color: rgba(201, 168, 76, 0.4);
+      }
+
+      .pc-whatif-btn:active {
+        transform: scale(0.95);
+      }
+
+      .pc-whatif-accept {
+        background: rgba(34, 139, 68, 0.2);
+        border-color: rgba(34, 139, 68, 0.5);
+        color: #4ade80;
+      }
+
+      .pc-whatif-accept:hover {
+        background: rgba(34, 139, 68, 0.35);
+        border-color: rgba(74, 222, 128, 0.6);
+        box-shadow: 0 0 8px rgba(34, 197, 94, 0.2);
+      }
+
+      .pc-whatif-undo {
+        background: rgba(185, 28, 28, 0.15);
+        border-color: rgba(185, 28, 28, 0.4);
+        color: #f87171;
+      }
+
+      .pc-whatif-undo:hover {
+        background: rgba(185, 28, 28, 0.25);
+        border-color: rgba(248, 113, 113, 0.5);
+        box-shadow: 0 0 8px rgba(239, 68, 68, 0.15);
+      }
+
+      .pc-whatif-reset {
+        background: rgba(107, 91, 74, 0.3);
+        border-color: rgba(107, 91, 74, 0.6);
+        color: #a8a090;
+        font-size: 11px;
+      }
+
+      .pc-whatif-reset:hover {
+        background: rgba(138, 122, 90, 0.35);
+        border-color: rgba(138, 122, 90, 0.8);
+      }
+
+      /* ===== 快捷操作区 ===== */
+      .pc-quick-content {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .pc-quick-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        background: rgba(50, 42, 35, 0.6);
+        border: 1px solid rgba(138, 122, 90, 0.3);
+        border-radius: 6px;
+      }
+
+      .pc-quick-icon {
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+
+      .pc-quick-label {
+        flex: 1;
+        font-size: 13px;
+        color: #a89888;
+      }
+
+      .pc-quick-value {
+        font-size: 14px;
+        font-weight: 700;
+        color: #f0d890;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      /* PC 模式下 What If 棋盘边框效果 */
+      .whatif-mode #pc-board-container #gameCanvas {
+        box-shadow:
+          0 0 30px rgba(201, 168, 76, 0.25),
+          0 4px 16px rgba(0, 0, 0, 0.3);
+      }
+
+      /* 滚动条美化（右侧功能舱） */
+      #pc-right-panel::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      #pc-right-panel::-webkit-scrollbar-track {
+        background: rgba(40, 35, 30, 0.5);
+      }
+
+      #pc-right-panel::-webkit-scrollbar-thumb {
+        background: rgba(138, 122, 90, 0.5);
+        border-radius: 3px;
+      }
+
+      #pc-right-panel::-webkit-scrollbar-thumb:hover {
+        background: rgba(138, 122, 90, 0.7);
+      }
+    }
+
+    /* ======== 微交互动画增强 ======== */
+
+    /* --- 1. 按钮点击下沉增强（统一效果，更明显） --- */
+    #toolbar button:active {
+      transform: translateY(3px) scale(0.96);
+      border-bottom-width: 1px;
+      box-shadow:
+        inset 0 2px 4px rgba(0, 0, 0, 0.4),
+        0 0 2px rgba(0, 0, 0, 0.2);
+    }
+
+    .num-btn:active, .num-btn.active {
+      transform: scale(0.90) translateY(2px);
+      box-shadow:
+        inset 0 4px 10px rgba(40, 30, 20, 0.6),
+        inset 0 -1px 2px rgba(255, 240, 210, 0.15),
+        0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+
+    .header-btn:active {
+      transform: scale(0.88) translateY(1px);
+    }
+
+    .whatif-btn:active {
+      transform: scale(0.92) translateY(1px);
+    }
+
+    .floating-hint-btn:active {
+      transform: scale(0.92);
+    }
+
+    /* --- 2. PC 端悬停上浮效果（仅 hover 设备） --- */
+    @media (hover: hover) {
+      /* 工具栏按钮悬停上浮 */
+      #toolbar button:hover {
+        transform: translateY(-2px);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 230, 180, 0.15),
+          0 4px 12px rgba(0, 0, 0, 0.4),
+          0 0 8px rgba(201, 168, 76, 0.15);
+        border-color: #a89878;
+      }
+
+      /* 数字键悬停上浮 + 变亮 */
+      .num-btn:hover {
+        transform: translateY(-2px);
+        box-shadow:
+          inset 0 2px 4px rgba(255, 240, 210, 0.5),
+          inset 0 -2px 6px rgba(60, 45, 30, 0.3),
+          0 5px 12px rgba(0, 0, 0, 0.45),
+          0 0 10px rgba(201, 168, 76, 0.2);
+        border-color: #8a7a5a;
+      }
+
+      /* 顶部按钮悬停上浮 */
+      .header-btn:hover {
+        transform: translateY(-1px);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.08),
+          0 3px 8px rgba(0, 0, 0, 0.3);
+      }
+
+      /* What If 按钮悬停上浮 */
+      .whatif-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+      }
+
+      /* 浮动提示按钮悬停上浮 */
+      .floating-hint-btn:hover {
+        transform: translateY(-2px) scale(1.05);
+        box-shadow:
+          0 4px 12px rgba(201, 168, 76, 0.4),
+          inset 0 1px 2px rgba(255, 230, 180, 0.25);
+      }
+
+      /* 浮条拉扣悬停效果增强 */
+      .float-bar-tab:hover {
+        transform: translateX(-2px);
+      }
+
+      /* PC 双栏布局下按钮悬停上浮 */
+      @media (min-width: 768px) and (orientation: landscape) {
+        #pc-toolbar button:hover {
+          transform: translateY(-2px);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 230, 180, 0.15),
+            0 4px 12px rgba(0, 0, 0, 0.4),
+            0 0 10px rgba(201, 168, 76, 0.2);
+          border-color: #b09870;
+        }
+
+        #pc-num-pad .num-btn:hover {
+          transform: translateY(-3px);
+          box-shadow:
+            inset 0 2px 4px rgba(255, 240, 210, 0.55),
+            inset 0 -2px 6px rgba(60, 45, 30, 0.3),
+            0 6px 16px rgba(0, 0, 0, 0.5),
+            0 0 14px rgba(201, 168, 76, 0.25);
+          border-color: #9a8a6a;
+        }
+      }
+    }
+
+    /* --- 3. 快照滑入动画 --- */
+    .snapshot-card.new-snapshot {
+      animation: snapshotSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    @keyframes snapshotSlideIn {
+      0% {
+        opacity: 0;
+        transform: translateX(30px) scale(0.8) rotate(5deg);
+      }
+      60% {
+        opacity: 1;
+        transform: translateX(-4px) scale(1.02) rotate(-1deg);
+      }
+      100% {
+        opacity: 1;
+        transform: translateX(0) scale(1) rotate(0deg);
+      }
+    }
+
+    /* PC 端快照滑入 */
+    @media (min-width: 768px) and (orientation: landscape) {
+      .pc-snapshot-card.new-snapshot {
+        animation: pcSnapshotSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      @keyframes pcSnapshotSlideIn {
+        0% {
+          opacity: 0;
+          transform: translateX(40px) scale(0.7) rotate(8deg);
+        }
+        60% {
+          opacity: 1;
+          transform: translateX(-5px) scale(1.03) rotate(-2deg);
+        }
+        100% {
+          opacity: 1;
+          transform: translateX(0) scale(1) rotate(0deg);
+        }
+      }
+    }
+
+    /* --- 4. 三幕灯切换增强动画（光晕扩散爆发） --- */
+    .three-act-indicator.act-switching .three-act-dot {
+      animation: actSwitchBurst 0.4s ease-out;
+    }
+
+    @keyframes actSwitchBurst {
+      0% {
+        transform: scale(1);
+        box-shadow: 0 0 6px currentColor;
+      }
+      40% {
+        transform: scale(1.6);
+        box-shadow:
+          0 0 12px currentColor,
+          0 0 24px currentColor,
+          0 0 36px currentColor;
+      }
+      100% {
+        transform: scale(1);
+        box-shadow: 0 0 6px currentColor;
+      }
+    }
+
+    /* 三幕灯文字切换闪烁 */
+    .three-act-indicator.act-switching .three-act-label {
+      animation: actLabelFlash 0.4s ease-out;
+    }
+
+    @keyframes actLabelFlash {
+      0% { opacity: 1; }
+      50% { opacity: 0.3; filter: brightness(1.5); }
+      100% { opacity: 1; }
+    }
+
+    /* --- 5. 连击数弹出动画增强 --- */
+    /* 关键帧已在 combo-system.js 中定义，这里补充颜色闪烁增强 */
+    .combo-number.pop {
+      animation: comboPopFlash 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    @keyframes comboPopFlash {
+      0% {
+        transform: scale(1);
+        filter: brightness(1);
+      }
+      40% {
+        transform: scale(1.4);
+        filter: brightness(1.8) saturate(1.5);
+      }
+      70% {
+        transform: scale(0.95);
+        filter: brightness(1.2);
+      }
+      100% {
+        transform: scale(1);
+        filter: brightness(1);
+      }
+    }
+
+    /* 连击数容器整体弹入 */
+    #combo-display.combo-appear {
+      animation: comboAppear 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    @keyframes comboAppear {
+      0% {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.7);
+      }
+      60% {
+        opacity: 1;
+        transform: translateY(4px) scale(1.05);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    /* --- 6. 数字键已完成状态增强（金色光辉完成感） --- */
+    .num-btn.completed {
+      opacity: 0.35;
+      filter: grayscale(0.6) brightness(0.8);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* 完成时的金色闪光（一次性） */
+    .num-btn.completed-flash {
+      animation: numCompletedFlash 0.5s ease-out;
+    }
+
+    @keyframes numCompletedFlash {
+      0% {
+        filter: brightness(1);
+        box-shadow:
+          inset 0 2px 4px rgba(255, 240, 210, 0.4),
+          inset 0 -2px 6px rgba(60, 45, 30, 0.35),
+          0 3px 6px rgba(0, 0, 0, 0.4);
+      }
+      30% {
+        filter: brightness(1.5) saturate(1.2);
+        box-shadow:
+          0 0 20px rgba(201, 168, 76, 0.8),
+          0 0 40px rgba(251, 191, 36, 0.5),
+          inset 0 2px 4px rgba(255, 240, 210, 0.6);
+      }
+      100% {
+        filter: grayscale(0.6) brightness(0.8);
+        opacity: 0.35;
+        box-shadow:
+          inset 0 2px 4px rgba(255, 240, 210, 0.2),
+          inset 0 -2px 6px rgba(60, 45, 30, 0.3),
+          0 1px 3px rgba(0, 0, 0, 0.3);
+      }
+    }
+
+    /* PC 端数字键完成状态 */
+    @media (min-width: 768px) and (orientation: landscape) {
+      #pc-num-pad .num-btn.completed {
+        opacity: 0.3;
+        filter: grayscale(0.7) brightness(0.75);
+      }
+
+      #pc-num-pad .num-btn.completed-flash {
+        animation: pcNumCompletedFlash 0.5s ease-out;
+      }
+
+      @keyframes pcNumCompletedFlash {
+        0% {
+          filter: brightness(1);
+        }
+        30% {
+          filter: brightness(1.6) saturate(1.3);
+          box-shadow:
+            0 0 25px rgba(201, 168, 76, 0.9),
+            0 0 50px rgba(251, 191, 36, 0.6),
+            inset 0 2px 4px rgba(255, 240, 210, 0.6);
+        }
+        100% {
+          filter: grayscale(0.7) brightness(0.75);
+          opacity: 0.3;
+        }
+      }
+    }
+
+    /* --- 7. 面板滑入滑出动画优化 --- */
+
+    /* 暂停面板：缩放+淡入，更有质感 */
+    #pause-overlay > div:first-of-type {
+      transform: scale(0.9);
+      opacity: 0;
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+                  opacity 0.25s ease;
+    }
+
+    #pause-overlay.pause-show > div:first-of-type {
+      transform: scale(1);
+      opacity: 1;
+    }
+
+    /* 暂停按钮悬停效果增强 */
+    @media (hover: hover) {
+      #pause-overlay button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+
+      #pause-overlay button:active {
+        transform: translateY(1px) scale(0.98);
+      }
+    }
+
+    /* 右侧浮条面板滑入流畅度优化 */
+    .float-bar-panel {
+      transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                  padding 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .float-bar-panel > * {
+      transition: opacity 0.25s ease 0.15s,
+                  transform 0.25s ease 0.15s;
+      transform: translateX(10px);
+    }
+
+    .right-floating-bar.panel-open .float-bar-panel > * {
+      transform: translateX(0);
+    }
+
+    /* 技术矩阵面板滑入优化（更流畅的 easing） */
+    #tech-matrix-panel {
+      transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+
+    #tech-matrix-overlay {
+      transition: opacity 0.3s ease !important;
+    }
+
+    /* 设置面板滑入优化 */
+    .settings-panel {
+      transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+    }
+
+    .settings-panel-overlay {
+      transition: opacity 0.3s ease !important;
+    }
+
+    /* --- 8. 填数闪光 CSS 类（供 JS 调用备用） --- */
+    .cell-fill-flash {
+      animation: cellFillFlash 0.25s ease-out;
+    }
+
+    @keyframes cellFillFlash {
+      0% {
+        transform: scale(0.8);
+        opacity: 0.5;
+        filter: brightness(1.5);
+      }
+      50% {
+        transform: scale(1.15);
+        filter: brightness(2) saturate(1.3);
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+        filter: brightness(1);
+      }
+    }
+
+    /* 错误填数抖动 */
+    .cell-fill-error {
+      animation: cellFillError 0.3s ease-out;
+    }
+
+    @keyframes cellFillError {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-4px); }
+      40% { transform: translateX(4px); }
+      60% { transform: translateX(-3px); }
+      80% { transform: translateX(3px); }
+    }
+
+    /* --- 9. 通用微交互辅助类 --- */
+
+    /* 轻微呼吸效果（用于重要按钮/指示器） */
+    .breath-gold {
+      animation: breathGold 2s ease-in-out infinite;
+    }
+
+    @keyframes breathGold {
+      0%, 100% {
+        box-shadow: 0 0 4px rgba(201, 168, 76, 0.4);
+      }
+      50% {
+        box-shadow: 0 0 12px rgba(201, 168, 76, 0.7), 0 0 20px rgba(251, 191, 36, 0.3);
+      }
+    }
+
+    /* 淡入上移（通用入场） */
+    .fade-in-up {
+      animation: fadeInUp 0.3s ease-out;
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* 缩放弹入 */
+    .scale-pop {
+      animation: scalePop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    @keyframes scalePop {
+      0% { transform: scale(0); opacity: 0; }
+      60% { transform: scale(1.1); opacity: 1; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    /* 移动端性能优化：减少动画 */
+    @media (max-width: 480px) {
+      /* 移动端保持简洁的点击效果，减少复杂阴影 */
+      .num-btn:active, .num-btn.active {
+        transform: scale(0.92) translateY(1px);
+      }
+
+      #toolbar button:active {
+        transform: translateY(2px) scale(0.97);
+      }
+
+      /* 移动端禁用部分 hover 闪烁（触屏无 hover） */
+      .num-btn:hover {
+        transform: none;
+        box-shadow:
+          inset 0 2px 4px rgba(255, 240, 210, 0.4),
+          inset 0 -2px 6px rgba(60, 45, 30, 0.35),
+          0 3px 6px rgba(0, 0, 0, 0.4);
+      }
+    }
+
+    /* 低动画偏好设置 */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Boss战预警红光覆盖层 -->
+  <div id="boss-warning-overlay"></div>
+  <div id="game-container">
+    <!-- 顶部状态栏（竖屏） -->
+    <div id="game-header">
+      <div class="header-left">
+        <div id="game-timer-display">00:00</div>
+      </div>
+      <div class="header-center">
+        <!-- 幕次指示器 -->
+        <div id="act-indicator" class="act-indicator" style="display:none;">
+          <div class="act-indicator-text" id="act-indicator-text">第一幕·速填</div>
+          <div class="act-indicator-progress">
+            <div class="act-indicator-fill" id="act-indicator-fill"></div>
+          </div>
+        </div>
+        <!-- 关卡标题 -->
+        <div class="header-level-title" id="level-title">—</div>
+      </div>
+      <div class="header-right">
+        <button class="header-btn header-menu" title="菜单">☰</button>
+      </div>
+    </div>
+
+    <!-- Boss战HUD进度条 -->
+    <div id="boss-battle-hud">
+      <div class="boss-hud-top-row">
+        <div class="boss-hud-portrait-wrap">
+          <img class="boss-hud-portrait" id="boss-hud-portrait" src="" alt="">
+          <div class="boss-hud-portrait-ring"></div>
+        </div>
+        <div class="boss-hud-center">
+          <div class="boss-hud-title">BOSS BATTLE</div>
+          <div class="boss-hud-bars">
+            <div class="boss-hud-bar">
+              <div class="boss-hud-bar-fill player" id="boss-hud-player-fill" style="width: 0%"></div>
+            </div>
+            <div class="boss-hud-bar">
+              <div class="boss-hud-bar-fill ai" id="boss-hud-ai-fill" style="width: 0%"></div>
+            </div>
+          </div>
+          <div class="boss-hud-scores">
+            <span class="boss-hud-score-player" id="boss-hud-player-score">0</span>
+            <span class="boss-hud-score-ai" id="boss-hud-ai-score">0</span>
+          </div>
+          <div class="boss-hud-labels">
+            <span class="boss-hud-label-player">你</span>
+            <span class="boss-hud-label-boss" id="boss-hud-boss-name">对手</span>
+          </div>
+        </div>
+        <div class="boss-hud-actions">
+          <button class="boss-hud-btn" id="boss-hud-difficulty" title="切换难度">⚙</button>
+          <button class="boss-hud-btn" id="boss-hud-retry" title="重新开始">↻</button>
+        </div>
+      </div>
+      <!-- 难度选择面板 -->
+      <div class="boss-difficulty-panel" id="boss-difficulty-panel">
+        <div class="boss-difficulty-title">选择难度</div>
+        <div class="boss-difficulty-options">
+          <button class="boss-diff-btn" data-diff="easy">简单</button>
+          <button class="boss-diff-btn active" data-diff="normal">普通</button>
+          <button class="boss-diff-btn" data-diff="hard">困难</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 45法则顶部常驻 HUD（仅9x9显示） -->
+    <div id="rule45-banner" class="rule45-banner" style="display:none;">
+      <div class="rule45-row-main">
+        <div class="rule45-block" id="r45-row-block">
+          <div class="r45-label" id="r45-row-label">行1·剩9</div>
+          <div class="r45-data" id="r45-row-data">0<span class="r45-diff">/45</span> <span class="r45-remain">差45</span></div>
+        </div>
+        <div class="rule45-block" id="r45-col-block">
+          <div class="r45-label" id="r45-col-label">列1·剩9</div>
+          <div class="r45-data" id="r45-col-data">0<span class="r45-diff">/45</span> <span class="r45-remain">差45</span></div>
+        </div>
+        <div class="rule45-block" id="r45-box-block">
+          <div class="r45-label" id="r45-box-label">宫1·剩9</div>
+          <div class="r45-data" id="r45-box-data">0<span class="r45-diff">/45</span> <span class="r45-remain">差45</span></div>
+        </div>
+      </div>
+      <div class="rule45-row-cage">
+        <span class="r45-cage-title" id="r45-cage-title">选择格子查看</span>
+        <span id="r45-cage-combos" style="margin-left:8px;">点击任意格子查看行列宫及笼子信息</span>
+      </div>
+    </div>
+
+    <!-- 棋盘区域 -->
+    <div id="board-area">
+      <!-- 三幕指示灯（棋盘上边框正中央） -->
+      <div id="three-act-indicator" class="three-act-indicator" style="display:none;">
+        <div class="three-act-dot"></div>
+        <div class="three-act-label">第一幕</div>
+      </div>
+      <!-- 提示解说气泡（棋盘上方） -->
+      <div id="hint-narration-bubble" class="hint-narration-bubble" style="display:none;">
+        <div class="hint-narration-avatar" id="hint-narration-avatar">💡</div>
+        <div class="hint-narration-content">
+          <div class="hint-narration-tech" id="hint-narration-tech" style="display:none;"></div>
+          <div class="hint-narration-text" id="hint-narration-text"></div>
+        </div>
+        <div class="hint-narration-step-badge" id="hint-narration-step" style="display:none;">1</div>
+      </div>
+      <canvas id="gameCanvas"></canvas>
+      <div id="long-press-halo" class="long-press-halo"></div>
+    </div>
+
+    <!-- 右侧浮条（拉扣头 + 滑出面板：提示进度 / What If快照 / 空） -->
+    <div id="right-floating-bar" class="right-floating-bar" style="display:none;">
+      <!-- 滑出面板 -->
+      <div class="float-bar-panel">
+        <!-- 提示播放中：进度指示器 -->
+        <div id="hint-progress-indicator" class="hint-progress" style="display:none;">
+          <div class="hint-progress-icon">⏳</div>
+          <div class="hint-progress-text"><span id="hint-current-step">0</span>/<span id="hint-total-steps">0</span></div>
+        </div>
+        <!-- What If 模式：快照堆叠容器 -->
+        <div id="whatif-snapshot-stack" class="whatif-stack" style="display:none;">
+          <div class="snapshot-cards" id="snapshot-cards">
+            <!-- 快照卡片动态生成 -->
+          </div>
+          <div class="whatif-actions">
+            <button class="whatif-btn whatif-accept" id="btn-whatif-accept" title="采纳 (Enter)">✅</button>
+            <button class="whatif-btn whatif-undo" id="btn-whatif-undo" title="回退 (Backspace)">↩️</button>
+            <button class="whatif-btn whatif-reset" id="btn-whatif-reset" title="彻底回退">🔄</button>
+          </div>
+        </div>
+        <!-- 普通模式：提示入口（可选） -->
+        <div id="floating-hint-entry" class="floating-hint-entry" style="display:none;">
+          <button class="floating-hint-btn" title="提示 (H)">💡</button>
+        </div>
+      </div>
+      <!-- 拉扣头（金属色小块） -->
+      <div class="float-bar-tab" id="float-bar-tab" title="快照面板">
+        <span class="float-bar-tab-icon" id="float-bar-tab-icon">🧪</span>
+        <span class="float-bar-tab-badge" id="float-bar-tab-badge" style="display:none;">0</span>
+      </div>
+    </div>
+
+    <!-- 多选提示 -->
+    <div class="multi-select-hint" id="multi-select-hint"></div>
+
+    <!-- 底部控制区 -->
+    <div id="bottom-controls">
+      <div class="landscape-controls">
+        <!-- 横屏关卡标题（仅横屏显示） -->
+        <div id="landscape-level-title" class="landscape-level-title"></div>
+        <!-- 工具栏：竖屏只显示核心按钮，横屏显示全部 -->
+        <div id="toolbar">
+          <button id="btn-chapter" title="章节选择 (C)">📚</button>
+          <button id="btn-pause" title="暂停 (Space)">⏸</button>
+          <button id="btn-undo" title="撤销 (Ctrl+Z)">↶</button>
+          <button id="btn-erase" title="擦除 (Delete)">⌫</button>
+          <button id="btn-note" title="笔记模式 (N)">✏️</button>
+          <button id="btn-hint" title="提示 (H)">💡</button>
+          <button id="btn-whatif" title="假设模式 (W)">❓</button>
+          <button id="btn-rule45" title="星衡法则 (R)">⚖</button>
+          <button id="btn-techniques" title="技巧图鉴 (T)">📖</button>
+          <button id="btn-tech-matrix" title="技术矩阵 (M)">📋</button>
+          <button id="btn-gallery" title="剧情图鉴 (G)">🎭</button>
+          <button id="btn-settings" title="设置 (S)">⚙</button>
+          <button id="btn-achievement" title="成就">🏆</button>
+        </div>
+        <!-- 数字按键 -->
+        <div id="num-pad">
+          <button class="num-btn" data-num="1"><span class="num-main">1</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="2"><span class="num-main">2</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="3"><span class="num-main">3</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="4"><span class="num-main">4</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="5"><span class="num-main">5</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="6"><span class="num-main">6</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="7"><span class="num-main">7</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="8"><span class="num-main">8</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="9"><span class="num-main">9</span><span class="num-count">9</span></button>
+        </div>
+        <p id="quick-fill-hint" class="quick-fill-hint">💡 长按数字键激活连填，点格子自动填入</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- PC 双栏工作区（宽度 ≥ 768px 且横屏时显示） -->
+  <div id="pc-workspace">
+    <!-- 左侧战区：棋盘 + 数字键盘 + 工具栏 -->
+    <div id="pc-left-panel">
+      <div id="pc-board-container">
+        <!-- canvas 会通过 JS 移动到这里 -->
+      </div>
+      <div id="pc-controls">
+        <!-- PC 端数字键盘（横向） -->
+        <div id="pc-num-pad">
+          <button class="num-btn" data-num="1"><span class="num-main">1</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="2"><span class="num-main">2</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="3"><span class="num-main">3</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="4"><span class="num-main">4</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="5"><span class="num-main">5</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="6"><span class="num-main">6</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="7"><span class="num-main">7</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="8"><span class="num-main">8</span><span class="num-count">9</span></button>
+          <button class="num-btn" data-num="9"><span class="num-main">9</span><span class="num-count">9</span></button>
+        </div>
+        <!-- PC 端工具栏 -->
+        <div id="pc-toolbar">
+          <button id="pc-btn-undo" title="撤销 (Ctrl+Z)">↶</button>
+          <button id="pc-btn-erase" title="擦除 (Delete)">⌫</button>
+          <button id="pc-btn-note" title="笔记模式 (N)">✏️</button>
+          <button id="pc-btn-whatif" title="假设模式 (W)">❓</button>
+          <button id="pc-btn-hint" title="提示 (H)">💡</button>
+          <button id="pc-btn-dict" title="字典 (D)">📋</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧功能舱 -->
+    <div id="pc-right-panel">
+      <!-- 45法则笔记本 -->
+      <div id="pc-rule45-notebook" class="pc-notebook-panel">
+        <div class="pc-panel-title">📐 45法则 · 笔记本</div>
+        <div id="pc-rule45-content" class="pc-rule45-body">
+          <div class="rule45-row-main">
+            <div class="rule45-block" id="pc-r45-row-block">
+              <div class="r45-label" id="pc-r45-row-label">行1·剩9</div>
+              <div class="r45-data" id="pc-r45-row-data">0<span class="r45-diff">/45</span> <span class="r45-remain">差45</span></div>
+            </div>
+            <div class="rule45-block" id="pc-r45-col-block">
+              <div class="r45-label" id="pc-r45-col-label">列1·剩9</div>
+              <div class="r45-data" id="pc-r45-col-data">0<span class="r45-diff">/45</span> <span class="r45-remain">差45</span></div>
+            </div>
+            <div class="rule45-block" id="pc-r45-box-block">
+              <div class="r45-label" id="pc-r45-box-label">宫1·剩9</div>
+              <div class="r45-data" id="pc-r45-box-data">0<span class="r45-diff">/45</span> <span class="r45-remain">差45</span></div>
+            </div>
+          </div>
+          <div class="rule45-row-cage">
+            <span class="r45-cage-title" id="pc-r45-cage-title">选择格子查看</span>
+            <span id="pc-r45-cage-combos" style="margin-left:8px;">点击任意格子查看行列宫及笼子信息</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分隔线 -->
+      <div class="pc-panel-divider"></div>
+
+      <!-- What If 快照堆叠 -->
+      <div id="pc-whatif-panel" class="pc-leather-panel">
+        <div class="pc-panel-title leather-title">
+          🧪 What If 快照
+          <span class="pc-whatif-count" id="pc-whatif-count">分支 0/3</span>
+        </div>
+        <div class="pc-whatif-snapshots">
+          <div class="pc-snapshot-cards" id="pc-snapshot-cards">
+            <!-- 快照卡片动态生成 -->
+          </div>
+        </div>
+        <div class="pc-whatif-actions">
+          <button class="pc-whatif-btn pc-whatif-accept" id="pc-btn-whatif-accept" title="采纳 (Enter)">✅ 采纳</button>
+          <button class="pc-whatif-btn pc-whatif-undo" id="pc-btn-whatif-undo" title="回退 (Backspace)">↩️ 回退</button>
+          <button class="pc-whatif-btn pc-whatif-reset" id="pc-btn-whatif-reset" title="彻底回退">🔄 彻底回退</button>
+        </div>
+      </div>
+
+      <!-- 分隔线 -->
+      <div class="pc-panel-divider"></div>
+
+      <!-- 快捷操作区 -->
+      <div id="pc-quick-panel" class="pc-leather-panel">
+        <div class="pc-panel-title leather-title">⚡ 快捷操作</div>
+        <div class="pc-quick-content">
+          <div class="pc-quick-item">
+            <span class="pc-quick-icon">💡</span>
+            <span class="pc-quick-label">剩余提示</span>
+            <span class="pc-quick-value" id="pc-hints-left">—</span>
+          </div>
+          <div class="pc-quick-item">
+            <span class="pc-quick-icon">⏱</span>
+            <span class="pc-quick-label">用时</span>
+            <span class="pc-quick-value" id="pc-timer-display">00:00</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pause Menu Overlay -->
+  <div id="pause-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(20,16,12,0.82);z-index:22000;display:none;flex-direction:column;align-items:center;justify-content:center;backdrop-filter:blur(8px);opacity:0;">
+    <div style="text-align:center;padding:32px 28px;background:linear-gradient(180deg,#3d322a 0%,#2a211c 100%);border:1px solid rgba(201,168,76,0.25);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.04);min-width:280px;max-width:90vw;position:relative;">
+      <div style="position:absolute;inset:8px;border:1px solid rgba(201,168,76,0.08);border-radius:8px;pointer-events:none;"></div>
+      <div style="font-size:20px;font-weight:700;color:#c9a84c;margin-bottom:4px;letter-spacing:4px;position:relative;z-index:1;">案件搁置</div>
+      <div style="font-size:12px;color:#8a7a6a;margin-bottom:20px;letter-spacing:2px;position:relative;z-index:1;">— PAUSED —</div>
+      <div id="pause-time" style="font-size:36px;font-weight:900;color:#d4c5b0;margin-bottom:24px;font-variant-numeric:tabular-nums;font-family:'Courier New',monospace;position:relative;z-index:1;">00:00</div>
+      <div style="display:flex;flex-direction:column;gap:8px;position:relative;z-index:1;">
+        <button id="btn-pause-resume" style="padding:14px 24px;font-size:15px;font-weight:600;background:linear-gradient(135deg,#d4a84c,#b8860b);color:#1a1510;border:none;border-radius:8px;cursor:pointer;transition:all 0.15s;box-shadow:0 2px 8px rgba(201,168,76,0.2);">继续调查</button>
+        <button id="btn-pause-restart" style="padding:12px 24px;font-size:14px;font-weight:500;background:rgba(60,50,40,0.6);border:1px solid rgba(138,122,90,0.4);color:#c4b5a0;border-radius:8px;cursor:pointer;transition:all 0.15s;">重新调查本案</button>
+        <button id="btn-pause-chapter" style="padding:12px 24px;font-size:14px;font-weight:500;background:rgba(50,42,35,0.8);border:1px solid rgba(138,122,90,0.3);color:#a89888;border-radius:8px;cursor:pointer;transition:all 0.15s;">返回案卷目录</button>
+        <button id="btn-pause-menu" style="padding:12px 24px;font-size:14px;font-weight:500;background:rgba(50,42,35,0.8);border:1px solid rgba(138,122,90,0.3);color:#a89888;border-radius:8px;cursor:pointer;transition:all 0.15s;">返回档案室</button>
+        <button id="btn-pause-settings" style="padding:12px 24px;font-size:14px;font-weight:500;background:rgba(50,42,35,0.8);border:1px solid rgba(138,122,90,0.3);color:#a89888;border-radius:8px;cursor:pointer;transition:all 0.15s;">⚙ 设置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通关高潮动画：破案印章 -->
+  <div id="climax-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:25000;pointer-events:none;overflow:hidden;">
+    <!-- 毛玻璃层 -->
+    <div id="climax-frosted" class="climax-frosted" style="position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(20,15,10,0.3);backdrop-filter:blur(0px);-webkit-backdrop-filter:blur(0px);opacity:0;"></div>
+    <!-- 大印章 -->
+    <div id="climax-stamp" class="climax-stamp" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(3) rotate(-15deg);opacity:0;pointer-events:none;">
+      <svg width="200" height="200" viewBox="0 0 200 200">
+        <!-- 印章外圈 -->
+        <circle cx="100" cy="100" r="90" fill="none" stroke="#b91c1c" stroke-width="6" opacity="0.9"/>
+        <circle cx="100" cy="100" r="80" fill="none" stroke="#b91c1c" stroke-width="2" opacity="0.7"/>
+        <!-- 印章内圈五角星 -->
+        <polygon points="100,55 109,82 138,82 115,99 124,127 100,110 76,127 85,99 62,82 91,82"
+                 fill="#b91c1c" opacity="0.85"/>
+        <!-- 印章文字：真相大白 -->
+        <text x="100" y="150" text-anchor="middle" fill="#b91c1c"
+              font-size="22" font-weight="900" font-family="'SimHei','Microsoft YaHei',sans-serif"
+              letter-spacing="4" opacity="0.9">真相大白</text>
+        <!-- 顶部弧形文字 -->
+        <path id="stamp-arc-top" d="M 30,100 A 70,70 0 0,1 170,100" fill="none"/>
+        <text fill="#b91c1c" font-size="14" font-weight="700" font-family="'SimHei','Microsoft YaHei',sans-serif" letter-spacing="3" opacity="0.8">
+          <textPath href="#stamp-arc-top" startOffset="50%" text-anchor="middle">CASE CLOSED</textPath>
+        </text>
+        <!-- 斑驳纹理（用随机噪点模拟） -->
+        <g opacity="0.15">
+          <circle cx="40" cy="60" r="3" fill="#b91c1c"/>
+          <circle cx="160" cy="70" r="2" fill="#b91c1c"/>
+          <circle cx="55" cy="140" r="2.5" fill="#b91c1c"/>
+          <circle cx="145" cy="150" r="3" fill="#b91c1c"/>
+          <circle cx="100" cy="30" r="2" fill="#b91c1c"/>
+          <circle cx="75" cy="100" r="1.5" fill="#b91c1c"/>
+          <circle cx="125" cy="100" r="2" fill="#b91c1c"/>
+          <circle cx="35" cy="100" r="1.5" fill="#b91c1c"/>
+          <circle cx="165" cy="100" r="2" fill="#b91c1c"/>
+        </g>
+      </svg>
+    </div>
+    <!-- 玻璃碎片容器 -->
+    <div id="climax-shards" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></div>
+  </div>
+
+  <!-- Completion Overlay -->
+  <div id="complete-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:20000;display:none;flex-direction:column;align-items:center;justify-content:center;">
+    <div style="text-align:center;padding:40px;">
+      <div style="font-size:64px;margin-bottom:20px;">🏆</div>
+      <h2 style="font-size:32px;color:#fbbf24;margin-bottom:16px;">关卡完成</h2>
+      <div id="complete-grade" style="font-size:72px;font-weight:900;color:#22c55e;margin:20px 0;text-shadow:0 0 30px currentColor;">S</div>
+      <div id="complete-time" style="font-size:18px;color:#94a3b8;margin-bottom:8px;">用时 00:00</div>
+      <div id="complete-errors" style="font-size:16px;color:#f87171;margin-bottom:8px;">错误 0 次</div>
+      <div id="complete-hints" style="font-size:16px;color:#60a5fa;margin-bottom:10px;">提示 0 次</div>
+      <div id="complete-insight" style="font-size:14px;color:#60a5fa;margin-bottom:30px;max-width:400px;line-height:1.6;"></div>
+      <button id="btn-next-level" style="padding:14px 32px;font-size:18px;background:#fbbf24;color:#0f172a;border:none;border-radius:8px;cursor:pointer;font-weight:bold;transition:transform 0.2s;">下一关</button>
+    </div>
+  </div>
+
+  <!-- Battle Result Overlay -->
+  <div id="battle-result-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:20001;display:none;flex-direction:column;align-items:center;justify-content:center;opacity:0;transition:opacity 200ms ease;">
+    <div id="battle-result-card" style="width:90%;max-width:420px;background:rgba(15,23,42,0.95);border-radius:16px;padding:32px 24px;text-align:center;border:1px solid rgba(255,255,255,0.1);box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+      <div id="battle-result-icon" style="font-size:56px;margin-bottom:12px;">🏆</div>
+      <h2 id="battle-result-title" style="font-size:32px;font-weight:900;margin-bottom:8px;letter-spacing:2px;">胜利</h2>
+      <div id="battle-result-opponent" style="font-size:14px;color:#94a3b8;margin-bottom:24px;">VS 对手</div>
+
+      <!-- 得分对比条 -->
+      <div style="margin-bottom:24px;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#94a3b8;margin-bottom:6px;">
+          <span id="battle-result-player-label">你</span>
+          <span id="battle-result-ai-label">对手</span>
+        </div>
+        <div style="position:relative;height:24px;background:rgba(255,255,255,0.1);border-radius:12px;overflow:hidden;">
+          <div id="battle-result-player-bar" style="position:absolute;left:0;top:0;height:100%;background:linear-gradient(90deg,#22c55e,#4ade80);border-radius:12px 0 0 12px;width:0%;transition:width 500ms ease-out;"></div>
+          <div id="battle-result-ai-bar" style="position:absolute;right:0;top:0;height:100%;background:linear-gradient(90deg,#ef4444,#f87171);border-radius:0 12px 12px 0;width:0%;transition:width 500ms ease-out;"></div>
+          <div style="position:absolute;left:50%;top:0;height:100%;width:2px;background:rgba(255,255,255,0.3);transform:translateX(-50%);"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:700;margin-top:6px;">
+          <span id="battle-result-player-score" style="color:#4ade80;">0</span>
+          <span id="battle-result-ai-score" style="color:#f87171;">0</span>
+        </div>
+      </div>
+
+      <!-- 三色得分明细 -->
+      <div id="battle-result-breakdown" style="text-align:left;margin-bottom:24px;padding:16px;background:rgba(255,255,255,0.05);border-radius:10px;">
+        <div style="font-size:12px;color:#94a3b8;margin-bottom:12px;letter-spacing:1px;">得分明细</div>
+        <!-- Simple (绿色) -->
+        <div style="margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+            <span style="color:#86efac;">🟢 简单格</span>
+            <span id="battle-result-simple" style="color:#cbd5e1;">0 × 1 = 0</span>
+          </div>
+          <div style="display:flex;gap:4px;height:6px;border-radius:3px;overflow:hidden;">
+            <div id="battle-result-simple-player" style="background:#22c55e;width:0%;transition:width 400ms ease-out;"></div>
+            <div id="battle-result-simple-ai" style="background:#ef4444;width:0%;transition:width 400ms ease-out;"></div>
+          </div>
+        </div>
+        <!-- Core (黄色) -->
+        <div style="margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+            <span style="color:#fde047;">🟡 核心格</span>
+            <span id="battle-result-core" style="color:#cbd5e1;">0 × 1.5 = 0</span>
+          </div>
+          <div style="display:flex;gap:4px;height:6px;border-radius:3px;overflow:hidden;">
+            <div id="battle-result-core-player" style="background:#eab308;width:0%;transition:width 400ms ease-out;"></div>
+            <div id="battle-result-core-ai" style="background:#ef4444;width:0%;transition:width 400ms ease-out;"></div>
+          </div>
+        </div>
+        <!-- Gate (红色) -->
+        <div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+            <span style="color:#fca5a5;">🔴 胜负手</span>
+            <span id="battle-result-gate" style="color:#cbd5e1;">0 × 2 = 0</span>
+          </div>
+          <div style="display:flex;gap:4px;height:6px;border-radius:3px;overflow:hidden;">
+            <div id="battle-result-gate-player" style="background:#dc2626;width:0%;transition:width 400ms ease-out;"></div>
+            <div id="battle-result-gate-ai" style="background:#ef4444;width:0%;transition:width 400ms ease-out;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 对战时长 -->
+      <div id="battle-result-duration" style="font-size:13px;color:#94a3b8;margin-bottom:28px;">
+        对战时长：<span style="color:#e2e8f0;font-weight:500;">00:00</span>
+      </div>
+
+      <!-- 按钮组 -->
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button id="btn-battle-retry" style="padding:12px 28px;font-size:15px;background:rgba(255,255,255,0.1);color:#e2e8f0;border:1px solid rgba(255,255,255,0.2);border-radius:8px;cursor:pointer;font-weight:600;transition:all 0.15s;">再来一局</button>
+        <button id="btn-battle-back" style="padding:12px 28px;font-size:15px;background:#fbbf24;color:#0f172a;border:none;border-radius:8px;cursor:pointer;font-weight:600;transition:all 0.15s;">返回关卡</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chapter Transition Overlay -->
+  <div id="chapter-transition" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#000;z-index:21000;flex-direction:column;align-items:center;justify-content:center;opacity:0;">
+    <div style="text-align:center;">
+      <div style="font-size:14px;color:#64748b;letter-spacing:8px;margin-bottom:20px;">下一章</div>
+      <div id="ct-title" style="font-size:42px;font-weight:900;color:#fbbf24;letter-spacing:6px;text-shadow:0 0 30px rgba(251,191,36,0.5);"></div>
+      <div id="ct-subtitle" style="font-size:18px;color:#94a3b8;margin-top:16px;letter-spacing:2px;"></div>
+    </div>
+  </div>
+
+  <!-- Game Ending Overlay -->
+  <div id="game-ending" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,#1e1b4b 0%,#000 100%);z-index:21000;flex-direction:column;align-items:center;justify-content:center;opacity:0;">
+    <div style="text-align:center;padding:40px;">
+      <div style="font-size:18px;color:#64748b;letter-spacing:12px;margin-bottom:30px;">— 全剧终 —</div>
+      <div style="font-size:56px;font-weight:900;color:#fbbf24;letter-spacing:8px;text-shadow:0 0 40px rgba(251,191,36,0.4);margin-bottom:30px;">CAGED CIPHER</div>
+      <div style="font-size:16px;color:#94a3b8;line-height:2;max-width:500px;margin:0 auto 40px;">
+        笼中的数字已全部解开<br>
+        而你找到的答案<br>
+        或许只是新的谜题的开始
+      </div>
+      <div style="font-size:14px;color:#475569;letter-spacing:4px;">感谢你的游玩</div>
+    </div>
+  </div>
+
+  <!-- True Ending Overlay -->
+  <div id="true-ending" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,rgba(251,191,36,0.15) 0%,#0c0a1f 40%,#000 100%);z-index:21500;flex-direction:column;align-items:center;justify-content:center;opacity:0;">
+    <div style="text-align:center;padding:40px;max-width:600px;">
+      <div style="font-size:14px;color:#fbbf24;letter-spacing:12px;margin-bottom:20px;opacity:0.8;">TRUE ENDING</div>
+      <div style="font-size:16px;color:#fbbf24;letter-spacing:8px;margin-bottom:30px;opacity:0.8;">— 真结局 —</div>
+      <div style="font-size:48px;font-weight:900;color:#fbbf24;letter-spacing:6px;text-shadow:0 0 60px rgba(251,191,36,0.6);margin-bottom:40px;">星辰归途</div>
+      <div style="font-size:15px;color:#fef3c7;line-height:2.2;margin-bottom:40px;opacity:0.9;">
+        设局人的真相终于揭晓<br>
+        莹莹的身世、沈墨的来信、星辰梭的秘密<br>
+        一切都有了答案<br><br>
+        但这不是结束<br>
+        而是新的开始<br>
+        ——星辰的光芒，将永远指引前方
+      </div>
+      <div style="font-size:20px;color:#fbbf24;letter-spacing:4px;text-shadow:0 0 20px rgba(251,191,36,0.5);">✨ 星辰传人 ✨</div>
+      <div style="font-size:12px;color:#78716c;letter-spacing:3px;margin-top:30px;">感谢你找到所有真相</div>
+    </div>
+  </div>
+
+  <!-- Core -->
+  <script src="core/event-bus.js?v=3"></script>
+  <script src="core/logger.js?v=3"></script>
+  <script src="core/event-logger.js?v=1"></script>
+
+  <!-- Expert System (5 layers) -->
+  <script src="expert/perception/player-state-monitor.js?v=3"></script>
+  <script src="expert/decision/decision-engine.js?v=3"></script>
+  <script src="expert/expression/expression-director.js?v=3"></script>
+  <script src="expert/learning/learning-system.js?v=3"></script>
+  <script src="expert/timing/beat-quantizer.js?v=3"></script>
+  <script src="expert/expert-system.js?v=3"></script>
+  <script src="expert/hint-system.js?v=1"></script>
+  <script src="expert/teaching-system.js?v=1"></script>
+  <script src="expert/replay-system.js?v=1"></script>
+
+  <!-- Audio Service -->
+  <script src="audio/audio-service.js?v=4"></script>
+
+  <!-- Story Engine -->
+  <script src="story/story-engine.js?v=3"></script>
+
+  <!-- Game Logic -->
+  <script src="game/board.js?v=5"></script>
+  <script src="game/note-system.js?v=2"></script>
+  <script src="game/renderer.js?v=17"></script>
+  <script src="game/rule45.js?v=1"></script>
+  <script src="game/tech-rater.js?v=3"></script>
+  <script src="game/tech-rater-adapter.js?v=2"></script>
+  <script src="game/ai-player.js?v=3"></script>
+  <script src="game/tech-matrix.js?v=1"></script>
+  <script src="game/settings-panel.js?v=3"></script>
+  <script src="game/achievement-panel.js?v=2"></script>
+  <script src="game/seal-animation.js?v=1"></script>
+  <script src="game/gallery-panel.js?v=2"></script>
+  <script src="game/menu-sheet.js?v=1"></script>
+  <script src="game/game-timer.js?v=1"></script>
+  <script src="game/combo-system.js?v=1"></script>
+  <script src="game/comedy-system.js?v=1"></script>
+  <script src="game/guide-battle.js?v=6"></script>
+  <script src="game/lesson-player.js?v=10"></script>
+
+  <!-- UI Components -->
+  <script src="ui/battle-result-overlay.js?v=1"></script>
+
+  <!-- Pages -->
+  <script src="pages/chapter-select.js?v=1"></script>
+  <script src="pages/guide.js?v=31"></script>
+</body>
+</html>
