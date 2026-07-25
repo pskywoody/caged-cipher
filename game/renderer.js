@@ -4968,7 +4968,7 @@ class Renderer {
         this._drawHintAnimReveal(ctx, cellSize, size, data, progress, board);
         break;
       case 'complete':
-        // 完成步骤不做额外绘制，仅作为时间占位
+        this._drawHintAnimComplete(ctx, cellSize, size, data, progress, board, state);
         break;
     }
   }
@@ -5394,6 +5394,106 @@ class Renderer {
       const arrowOpacity = Math.max(0.15, 0.6 - progress * 0.45);
       this._drawHintArrow(ctx, cellSize, size, data.arrow, 1, arrowOpacity, board);
     }
+  }
+
+  /**
+   * 绘制 complete 类型：完成闪光（从中心向外扩散的金色光环 + 粒子效果）
+   * @private
+   */
+  _drawHintAnimComplete(ctx, cellSize, size, data, progress, board, state) {
+    // 找到最后一个有目标格子的步骤
+    let targetCell = null;
+    if (state.steps) {
+      for (let i = state.steps.length - 1; i >= 0; i--) {
+        const s = state.steps[i];
+        if (s.data && s.data.cell) {
+          targetCell = s.data.cell;
+          break;
+        }
+        if (s.data && s.data.targetCell) {
+          targetCell = s.data.targetCell;
+          break;
+        }
+      }
+    }
+    if (!targetCell) return;
+
+    const r = targetCell[0];
+    const c = targetCell[1];
+    if (r < 0 || r >= size || c < 0 || c >= size) return;
+
+    const cx = c * cellSize + cellSize / 2;
+    const cy = r * cellSize + cellSize / 2;
+
+    // 扩散光环：从 0.3 倍扩散到 2 倍格子大小
+    const ringScale = 0.3 + progress * 1.7;
+    const ringSize = cellSize * ringScale;
+    const ringOpacity = Math.max(0, 1 - progress);
+
+    ctx.save();
+
+    // 外发光光环
+    if (ringOpacity > 0) {
+      ctx.strokeStyle = `rgba(251, 191, 36, ${ringOpacity * 0.8})`;
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#fbbf24';
+      ctx.shadowBlur = 15;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ringSize / 2, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 第二道光环（稍微延迟一点）
+      if (progress > 0.2) {
+        const innerProgress = (progress - 0.2) / 0.8;
+        const innerRingScale = 0.2 + innerProgress * 1.5;
+        const innerRingSize = cellSize * innerRingScale;
+        const innerOpacity = Math.max(0, 0.6 - innerProgress);
+        ctx.strokeStyle = `rgba(251, 191, 36, ${innerOpacity})`;
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(cx, cy, innerRingSize / 2, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // 中心闪光（前半段最亮）
+    if (progress < 0.6) {
+      const flashProgress = progress / 0.6;
+      const flashOpacity = flashProgress < 0.5 ? flashProgress * 2 : (1 - flashProgress) * 2;
+      const flashSize = cellSize * (0.4 + flashProgress * 0.3);
+
+      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, flashSize);
+      gradient.addColorStop(0, `rgba(255, 255, 255, ${flashOpacity * 0.9})`);
+      gradient.addColorStop(0.3, `rgba(251, 191, 36, ${flashOpacity * 0.6})`);
+      gradient.addColorStop(1, 'rgba(251, 191, 36, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(cx - flashSize, cy - flashSize, flashSize * 2, flashSize * 2);
+    }
+
+    // 粒子效果：4个方向的小星星
+    if (progress > 0.1) {
+      const particleProgress = (progress - 0.1) / 0.9;
+      const particleDist = cellSize * 0.6 * particleProgress;
+      const particleOpacity = Math.max(0, 1 - particleProgress);
+
+      ctx.fillStyle = `rgba(251, 191, 36, ${particleOpacity})`;
+      ctx.shadowColor = '#fbbf24';
+      ctx.shadowBlur = 6;
+
+      for (let i = 0; i < 6; i++) {
+        const angle = (i / 6) * Math.PI * 2 + progress * 0.5;
+        const px = cx + Math.cos(angle) * particleDist;
+        const py = cy + Math.sin(angle) * particleDist;
+        const pSize = Math.max(2, cellSize * 0.08 * (1 - particleProgress * 0.5));
+
+        ctx.beginPath();
+        ctx.arc(px, py, pSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
   }
 
   // ---------- 10.2 自定义多类型高亮（hint/error/success）----------

@@ -1817,6 +1817,25 @@
       }
     }
 
+    /* PC 双栏模式下的解说气泡 */
+    @media (min-width: 768px) and (orientation: landscape) {
+      #pc-left-panel .hint-narration-bubble {
+        top: -12px;
+        min-width: 280px;
+        max-width: 420px;
+        padding: 14px 18px 14px 16px;
+      }
+      #pc-left-panel .hint-narration-text {
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      #pc-left-panel .hint-narration-avatar {
+        width: 38px;
+        height: 38px;
+        font-size: 20px;
+      }
+    }
+
     /* ===== PC 双栏布局 ===== */
     #pc-workspace {
       display: none;
@@ -1851,11 +1870,12 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
-        gap: 16px;
-        padding: 20px;
+        justify-content: flex-start;
+        gap: 12px;
+        padding: 16px 20px 20px;
         min-width: 0;
         overflow: hidden;
+        position: relative;
       }
 
       #pc-board-container {
@@ -1865,12 +1885,14 @@
         flex: 1;
         width: 100%;
         min-height: 0;
+        position: relative;
       }
 
       #pc-board-container #gameCanvas {
         width: auto !important;
         max-width: 100%;
-        max-height: calc(100vh - 180px);
+        max-height: calc(100vh - 140px);
+        min-height: 520px;
         aspect-ratio: 1;
       }
 

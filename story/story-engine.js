@@ -15,12 +15,12 @@
 
   // Typewriter speed presets (ms per character)
   const TYPING_SPEEDS = {
-    serene: 80,
-    normal: 45,
-    fast: 15,
+    serene: 120,
+    normal: 70,
+    fast: 30,
     instant: 0,
-    heavy: 120,
-    thinking: 60,
+    heavy: 160,
+    thinking: 90,
   };
 
   // Emotion -> typing speed
@@ -950,7 +950,7 @@
       if (this._narratorEl) return;
       this._narratorEl = document.createElement('div');
       this._narratorEl.id = 'narrator-text';
-      this._narratorEl.style.cssText = 'position:fixed;bottom:120px;left:50%;transform:translateX(-50%);width:90%;max-width:600px;text-align:center;color:#e2e8f0;font-size:18px;font-style:italic;z-index:10000;display:none;line-height:1.8;min-height:40px;';
+      this._narratorEl.style.cssText = 'position:fixed;bottom:120px;left:50%;transform:translateX(-50%);width:90%;max-width:600px;text-align:center;color:#e2e8f0;font-size:18px;font-style:italic;z-index:10000;display:none;line-height:1.8;min-height:40px;padding:18px 28px;background:linear-gradient(135deg,rgba(15,23,42,0.92) 0%,rgba(30,41,59,0.88) 100%);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(251,191,36,0.25);border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.5),0 0 0 1px rgba(251,191,36,0.1) inset,0 2px 8px rgba(251,191,36,0.08);';
       this._narratorEl.addEventListener('click', () => this.nextDialogue());
       document.body.appendChild(this._narratorEl);
     }

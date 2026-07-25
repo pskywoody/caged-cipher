@@ -33,33 +33,35 @@
       name: 'reckless',
       displayName: '冒失型',
       // 技巧上限：只会基础到中级技巧
-      maxTechLevel: 5,
+      maxTechLevel: 6,
       // 发现概率：越难的技巧越容易"没看出来"
       discoveryRate: {
         1: 1.0,    // 孤星：100%看到
-        2: 0.95,   // 唯一组合：95%
-        3: 0.85,   // 隐曜：85%
-        4: 0.7,    // 星衡法则：70%
-        5: 0.5,    // 并蒂锁：50%
+        2: 0.98,   // 唯一组合：98%
+        3: 0.92,   // 隐曜：92%
+        4: 0.82,   // 星衡法则：82%
+        5: 0.68,   // 并蒂锁：68%
+        6: 0.5,    // 区块排除：50%
       },
       // 选择策略：认知惯性评分（人类风格决策）
       selectionStrategy: 'humanLike',
       // 基础失误率（填错的概率，虽然不显示数字但占着格子）
-      baseErrorRate: 0.12,
+      baseErrorRate: 0.08,
       // 拦截欲望：低 - 阿妍喜欢自己解题不抢
-      interceptProbability: 0.25,
+      interceptProbability: 0.35,
       // 速度曲线：不稳定，时快时慢
       speedCurve: 'erratic',
       // 速度倍率（相对于标准时间）
-      speedMultiplier: { min: 0.6, max: 1.5 },
+      speedMultiplier: { min: 0.7, max: 1.3 },
       // 基础思考时间（毫秒），按技巧等级递增
       // 注意：这是"原始"时间，会再乘以速度倍率和棋盘大小修正
       baseThinkTime: {
-        1: 80,
-        2: 140,
-        3: 220,
-        4: 360,
-        5: 520,
+        1: 60,
+        2: 110,
+        3: 180,
+        4: 280,
+        5: 420,
+        6: 580,
       },
     },
 
@@ -71,33 +73,33 @@
       discoveryRate: {
         1: 1.0,
         2: 1.0,
-        3: 1.0,
-        4: 0.98,
-        5: 0.95,
-        6: 0.9,
-        7: 0.85,
-        8: 0.8,
-        9: 0.7,
-        10: 0.6,
+        3: 0.98,
+        4: 0.95,
+        5: 0.92,
+        6: 0.88,
+        7: 0.82,
+        8: 0.75,
+        9: 0.65,
+        10: 0.55,
       },
       // 选择策略：认知惯性评分（人类风格决策）
       selectionStrategy: 'humanLike',
-      baseErrorRate: 0.02,
+      baseErrorRate: 0.015,
       // 拦截欲望：中 - 守笼人稳中带攻
-      interceptProbability: 0.4,
+      interceptProbability: 0.5,
       speedCurve: 'steady',
-      speedMultiplier: { min: 0.8, max: 1.2 },
+      speedMultiplier: { min: 0.85, max: 1.15 },
       baseThinkTime: {
-        1: 60,
-        2: 110,
-        3: 180,
-        4: 280,
-        5: 400,
-        6: 560,
-        7: 720,
-        8: 920,
-        9: 1200,
-        10: 1500,
+        1: 50,
+        2: 90,
+        3: 150,
+        4: 230,
+        5: 330,
+        6: 460,
+        7: 600,
+        8: 780,
+        9: 1000,
+        10: 1300,
       },
     },
 
@@ -105,33 +107,35 @@
     surround: {
       name: 'surround',
       displayName: '包围型',
-      maxTechLevel: 8,
+      maxTechLevel: 9,
       discoveryRate: {
         1: 1.0,
-        2: 0.98,
-        3: 0.95,
-        4: 0.9,
-        5: 0.85,
-        6: 0.8,
-        7: 0.75,
-        8: 0.7,
+        2: 0.99,
+        3: 0.97,
+        4: 0.94,
+        5: 0.90,
+        6: 0.85,
+        7: 0.80,
+        8: 0.72,
+        9: 0.62,
       },
       // 选择策略：认知惯性评分（人类风格决策）
       selectionStrategy: 'humanLike',
-      baseErrorRate: 0.06,
+      baseErrorRate: 0.04,
       // 拦截欲望：高 - 设局人爱读心抢格子
-      interceptProbability: 0.65,
+      interceptProbability: 0.75,
       speedCurve: 'accelerating',
-      speedMultiplier: { min: 0.6, max: 1.4 },
+      speedMultiplier: { min: 0.7, max: 1.3 },
       baseThinkTime: {
-        1: 70,
-        2: 130,
-        3: 210,
-        4: 320,
-        5: 460,
-        6: 640,
-        7: 840,
-        8: 1080,
+        1: 55,
+        2: 100,
+        3: 170,
+        4: 260,
+        5: 380,
+        6: 520,
+        7: 700,
+        8: 900,
+        9: 1150,
       },
     },
   };

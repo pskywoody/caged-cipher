@@ -10041,7 +10041,20 @@
       '</div>' +
       '<div class="char-bubble-close" style="flex-shrink:0;font-size:10px;color:#64748b;cursor:pointer;padding:2px 4px;" title="点击关闭">✕</div>';
 
-    document.body.appendChild(bubble);
+    // PC 布局下调整气泡位置（放在左侧面板内右上角，更靠近棋盘）
+    if (_isPcLayout) {
+      const leftPanel = document.getElementById('pc-left-panel');
+      if (leftPanel) {
+        leftPanel.appendChild(bubble);
+        bubble.style.position = 'absolute';
+        bubble.style.top = '8px';
+        bubble.style.right = '12px';
+        bubble.style.maxWidth = '340px';
+        bubble.style.zIndex = '500';
+      }
+    } else {
+      document.body.appendChild(bubble);
+    }
 
     // Animate in
     requestAnimationFrame(() => {
@@ -10682,6 +10695,7 @@
 
     const canvas = document.getElementById('gameCanvas');
     const longPressHalo = document.getElementById('long-press-halo');
+    const hintBubble = document.getElementById('hint-narration-bubble');
     const pcBoardContainer = document.getElementById('pc-board-container');
     const mobileBoardArea = document.getElementById('board-area');
 
@@ -10689,6 +10703,10 @@
 
     // 移动 canvas 到 PC 左侧战区
     pcBoardContainer.appendChild(canvas);
+    // 移动提示气泡到 PC 棋盘容器内
+    if (hintBubble) {
+      pcBoardContainer.appendChild(hintBubble);
+    }
     if (longPressHalo) {
       longPressHalo.style.display = 'none';
     }
@@ -10715,6 +10733,7 @@
 
     const canvas = document.getElementById('gameCanvas');
     const longPressHalo = document.getElementById('long-press-halo');
+    const hintBubble = document.getElementById('hint-narration-bubble');
     const pcBoardContainer = document.getElementById('pc-board-container');
     const mobileBoardArea = document.getElementById('board-area');
 
@@ -10726,6 +10745,10 @@
       longPressHalo.style.display = '';
     } else {
       mobileBoardArea.appendChild(canvas);
+    }
+    // 移动提示气泡回移动端棋盘区域
+    if (hintBubble) {
+      mobileBoardArea.appendChild(hintBubble);
     }
 
     // 清除标记
