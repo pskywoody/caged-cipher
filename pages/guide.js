@@ -99,10 +99,12 @@
   // ============================================================
   Object.defineProperty(global, 'guideNoteMode', {
     get: function() { return noteMode; },
+    set: function(v) { noteMode = v; },
     configurable: true,
   });
   Object.defineProperty(global, 'guideBoard', {
     get: function() { return board; },
+    set: function(v) { board = v; },
     configurable: true,
   });
 
@@ -260,6 +262,50 @@
     // 让 ctx 可以访问到自身的属性（用于 getter 闭包）
     orchestrator = new GuideOrchestrator(ctx);
     orchestrator.initManagers();
+
+    // 同步关键状态回闭包（orchestrator 可能修改了 ctx 上的值）
+    _syncCtxToClosure(ctx);
+  }
+
+  // 将 ctx 上的状态同步回 guide.js 闭包变量
+  // 解决"值拷贝导致 ctx 和闭包变量不同步"的问题
+  function _syncCtxToClosure(ctx) {
+    board = ctx.board;
+    renderer = ctx.renderer;
+    inputRouter = ctx.inputRouter;
+    expertSystem = ctx.expertSystem;
+    comboSystem = ctx.comboSystem;
+    comedySystem = ctx.comedySystem;
+    storyEngine = ctx.storyEngine;
+    hintSystem = ctx.hintSystem;
+    techMatrix = ctx.techMatrix;
+    gameTimer = ctx.gameTimer;
+    chapterSelect = ctx.chapterSelect;
+    settingsPanel = ctx.settingsPanel;
+    achievementCoordinator = ctx.achievementCoordinator;
+    lessonUICoordinator = ctx.lessonUICoordinator;
+    bossCoordinator = ctx.bossCoordinator;
+    threeActEngine = ctx.threeActEngine;
+    comboUI = ctx.comboUI;
+    whatIfManager = ctx.whatIfManager;
+    autoHintSystem = ctx.autoHintSystem;
+    heatmapManager = ctx.heatmapManager;
+    techniqueEncyclopedia = ctx.techniqueEncyclopedia;
+    levelFeatureApplier = ctx.levelFeatureApplier;
+    currentLevelData = ctx.currentLevelData;
+    currentChapterData = ctx.currentChapterData;
+    currentLevelId = ctx.currentLevelId;
+    isCompleted = ctx.isCompleted;
+    isPaused = ctx.isPaused;
+    noteMode = ctx.noteMode;
+    hintCount = ctx.hintCount;
+    errorCount = ctx.errorCount;
+    usedNotes = ctx.usedNotes;
+    startTime = ctx.startTime;
+    WhatIfState = ctx.WhatIfState;
+    HintPlayerState = ctx.HintPlayerState;
+    gameController = ctx.gameController;
+    _debugMode = ctx._debugMode;
   }
 
   // 初始化函数（转发到 orchestrator）
@@ -333,13 +379,19 @@
 
   // ============================================================
   //  关卡加载与启动（转发到 GameController）
+  //  注意：gameController 由 orchestrator 在 initGameController 中创建
+  //  必须从 orchestrator.ctx 读取，不能直接用闭包变量（值拷贝问题）
   // ============================================================
   async function loadLevel(levelId) {
-    return gameController.loadLevel(levelId);
+    const gc = orchestrator ? orchestrator.ctx.gameController : gameController;
+    if (!gc) throw new Error('gameController 未初始化');
+    return gc.loadLevel(levelId);
   }
 
   async function startLevel(levelId) {
-    return gameController.startLevel(levelId);
+    const gc = orchestrator ? orchestrator.ctx.gameController : gameController;
+    if (!gc) throw new Error('gameController 未初始化');
+    return gc.startLevel(levelId);
   }
 
   // ============================================================

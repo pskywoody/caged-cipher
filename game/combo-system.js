@@ -98,6 +98,12 @@
     // === 根据盘面尺寸和新手状态计算里程碑 ===
     _initMilestones() {
       if (this.isNewPlayer || this.gridSize <= 4) {
+        // 4x4 新手保护：减少里程碑，降低 EUREKA 门槛
+        this._milestones = {
+          2: { key: 'combo_2',  label: '2连击',  sfx: 'combo_3' },
+          4: { key: 'eureka',   label: 'EUREKA!', sfx: 'eureka' },
+          6: { key: 'combo_max', label: 'MAX连击', sfx: 'combo_max' },
+        };
       } else if (this.gridSize === 6) {
         // 6x6：适度降低
         this._milestones = {
