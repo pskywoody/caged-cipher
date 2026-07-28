@@ -20,6 +20,15 @@
   const AutoHintSystem = window.AutoHintSystem;
   const DebugTools = window.DebugTools;
   const PcLayoutManager = window.PcLayoutManager;
+  const PauseManager = window.PauseManager;
+  const EndingManager = window.EndingManager;
+  const ExpertCharacterHandler = window.ExpertCharacterHandler;
+  const CellInputHandler = window.CellInputHandler;
+
+  // === 第九阶段抽离：GameContext 中央状态和 CellInputHandler 核心输入 ===
+  // GameContext 通过 initGameContext() 初始化并挂到 window.GameContext
+  // CellInputHandler 通过构造函数注入依赖，封装核心输入处理逻辑
+  let cellInputHandler = null;
 
   // === 第四阶段抽离：GameController 和 WhatIfManager 实例 ===
   let gameController = null;
@@ -260,7 +269,12 @@
 
     // ===== GameContext 中央状态（五层联动核心）=====
     // 统一的游戏状态容器，感知/决策/行动/学习/三幕式各层在此交汇
-    _initGameContext();
+    // 已迁移到 core/GameContext.js，通过全局 initGameContext() 初始化
+    if (typeof initGameContext === 'function') {
+      initGameContext({ logger: log });
+    } else {
+      _initGameContext(); // 向后兼容
+    }
 
     // Init expert system
     expertSystem = new ExpertSystem();
@@ -271,6 +285,15 @@
     global.ExpertSystem = expertSystem;
 
     // Register character-based feedback handlers
+    ExpertCharacterHandler.init({
+      getExpertSystem: () => expertSystem,
+      showCharacterBubble: showCharacterBubble,
+      showToast: showToast,
+      showAutoHint: showAutoHint,
+      getLessonUICoordinator: () => lessonUICoordinator,
+      getHintPlayerState: () => HintPlayerState,
+      log: log,
+    });
     registerExpertCharacterHandlers();
 
     // Get story engine
@@ -744,6 +767,26 @@
 
       // 日志
       log: log,
+    });
+
+    // === 第九阶段抽离：PauseManager 和 EndingManager 初始化 ===
+    PauseManager.init({
+      isPaused: () => isPaused,
+      setPaused: (v) => { isPaused = v; },
+      isCompleted: () => isCompleted,
+      getBoard: () => board,
+      getGameTimer: () => gameTimer,
+      getExpertSystem: () => expertSystem,
+      getStartTime: () => startTime,
+      getGameController: () => gameController,
+      getSettingsPanel: () => settingsPanel,
+      AudioService: typeof AudioService !== 'undefined' ? AudioService : null,
+    });
+
+    EndingManager.init({
+      getCurrentChapterData: () => currentChapterData,
+      getChapterSelect: () => chapterSelect,
+      getProgressManager: () => global.ProgressManager,
     });
   }
 
@@ -1259,6 +1302,52 @@
     });
     inputRouter.bindEvents(canvas, document);
 
+    // --- 初始化 CellInputHandler（核心输入处理器，已迁移到 core/CellInputHandler.js）---
+    if (CellInputHandler && !cellInputHandler) {
+      cellInputHandler = new CellInputHandler({
+        // 核心对象引用
+        board: board,
+        renderer: renderer,
+        comboSystem: comboSystem,
+        expertSystem: expertSystem,
+        hintSystem: hintSystem,
+        comedySystem: comedySystem,
+        AudioService: AudioService,
+        VIBRATE_PRESETS: VIBRATE_PRESETS,
+        EventLogger: EventLogger,
+        GuideBattle: (typeof GuideBattle !== 'undefined') ? GuideBattle : null,
+        WhatIfState: WhatIfState,
+        lessonUICoordinator: lessonUICoordinator,
+        achievementCoordinator: achievementCoordinator,
+        currentLevelData: currentLevelData,
+        global: global,
+
+        // 状态 getter / setter
+        getNoteMode: () => noteMode,
+        setNoteMode: (v) => { noteMode = v; },
+        getUsedNotes: () => usedNotes,
+        setUsedNotes: (v) => { usedNotes = v; },
+        getErrorCount: () => errorCount,
+        incErrorCount: () => { errorCount++; },
+        getSolution: () => currentLevelData?.solution,
+
+        // 业务回调
+        showToast: showToast,
+        vibrate: vibrate,
+        validateBoard: validateBoard,
+        highlightAllErrors: highlightAllErrors,
+        updateNumBtnCompletedState: updateNumBtnCompletedState,
+        checkCompletion: checkCompletion,
+        updateRule45Banner: updateRule45Banner,
+        addWhatIfSnapshot: addWhatIfSnapshot,
+        lessonHandleCellFill: _lessonHandleCellFill,
+        detectTechniqueForFill: detectTechniqueForFill,
+        recordTechniqueUsage: recordTechniqueUsage,
+        updateNoteButtonState: updateNoteButtonState,
+        updateMultiSelectHint: updateMultiSelectHint,
+      });
+    }
+
     // --- Toolbar buttons ---
     const btnNote = document.getElementById('btn-note');
     if (btnNote) {
@@ -1545,474 +1634,58 @@
   function checkAndClearActiveNumber() { return inputRouter && inputRouter.checkAndClearActiveNumber(); }
   function handleBoardLongPress(cell, phase) { return inputRouter && inputRouter._handleBoardLongPress(cell, phase); }
 
-  // === 检查答案 ===
+  // === 检查答案（已迁移到 core/CellInputHandler.js）===
   function checkBoardAnswer() {
-    if (!board) return;
-    const result = validateBoard();
-    if (!result.filled) {
-      showToast('盘面还没有填满', 1500);
-      return;
-    }
-    if (result.valid) {
-      showToast('全部正确！恭喜通关~', 2000);
-    } else {
-      const count = result.errors.length;
-      showToast(`发现 ${count} 处错误`, 2000);
-      // 高亮错误
-      highlightAllErrors();
-    }
+    return cellInputHandler && cellInputHandler.checkBoardAnswer();
   }
 
-  // === 自动填充候选数 ===
+  // === 自动填充候选数（已迁移到 core/CellInputHandler.js）===
   function autoFillCandidates() {
-    if (!board) return;
-    const size = board.size;
-    const { boxW, boxH } = board.getBoxSize();
-    let filledCount = 0;
-
-    for (let r = 0; r < size; r++) {
-      for (let c = 0; c < size; c++) {
-        const cell = board.cells[r][c];
-        if (cell.fixedNum || cell.fillNum) continue;
-        if (cell.candidates.size > 0) continue; // 已经有候选数的跳过
-
-        // 计算可用数字
-        const used = new Set();
-        // 行
-        for (let i = 0; i < size; i++) {
-          const v = board.cells[r][i].fixedNum || board.cells[r][i].fillNum;
-          if (v) used.add(v);
-        }
-        // 列
-        for (let i = 0; i < size; i++) {
-          const v = board.cells[i][c].fixedNum || board.cells[i][c].fillNum;
-          if (v) used.add(v);
-        }
-        // 宫
-        const boxR = Math.floor(r / boxH) * boxH;
-        const boxC = Math.floor(c / boxW) * boxW;
-        for (let i = boxR; i < boxR + boxH; i++) {
-          for (let j = boxC; j < boxC + boxW; j++) {
-            const v = board.cells[i][j].fixedNum || board.cells[i][j].fillNum;
-            if (v) used.add(v);
-          }
-        }
-        // 笼（杀手数独）
-        const cageIds = cell.cageIds && cell.cageIds.length > 0 ? cell.cageIds : (cell.cageId !== null ? [cell.cageId] : []);
-        for (const cageId of cageIds) {
-          if (board.cageIdToCells && board.cageIdToCells[cageId]) {
-            for (const [cr, cc] of board.cageIdToCells[cageId]) {
-              const v = board.cells[cr][cc].fixedNum || board.cells[cr][cc].fillNum;
-              if (v) used.add(v);
-            }
-          }
-        }
-
-        // 添加候选数
-        for (let n = 1; n <= size; n++) {
-          if (!used.has(n)) {
-            cell.candidates.add(n);
-            filledCount++;
-          }
-        }
-      }
-    }
-
-    if (window.gameNoteSystem && typeof window.gameNoteSystem.onNumberFilled === 'function') {
-      window.gameNoteSystem.onNumberFilled();
-    }
-    renderer.render(board);
-    if (filledCount > 0) {
-      showToast(`已自动填充 ${filledCount} 个候选数`, 1500);
-    } else {
-      showToast('所有空格都已有候选数', 1500);
-    }
-    AudioService.sfx.play('note_toggle');
+    return cellInputHandler && cellInputHandler.autoFillCandidates();
   }
 
-  // === 增减选中格数字 ===
+  // === 增减选中格数字（已迁移到 core/CellInputHandler.js）===
   function adjustSelectedNumber(delta) {
-    if (!board) return;
-    const cell = board.getActiveCell();
-    if (!cell) {
-      board.selectCell(0, 0);
-      renderer.render(board);
-      return;
-    }
-    const { r, c } = cell;
-    const targetCell = board.cells[r][c];
-    if (targetCell.fixedNum) return;
-
-    let current = targetCell.fillNum || 0;
-    let next = current + delta;
-
-    // 循环：超过最大值回到 1，低于 1 回到最大值
-    if (next > board.size) next = 1;
-    if (next < 1) next = board.size;
-
-    if (next === 0) {
-      handleErase();
-    } else {
-      handleNumberInput(next);
-    }
+    return cellInputHandler && cellInputHandler.adjustSelectedNumber(delta);
   }
 
   function updateMultiSelectHint() { return UIManager.updateMultiSelectHint(); }
 
   function updateNoteButtonState() { return UIManager.updateNoteButtonState(); }
 
+  // === 擦除处理（已迁移到 core/CellInputHandler.js）===
   function handleErase() {
-    if (_isProcessingInput) return;
-    _beginProcessing();
-    AudioService.sfx.play('erase');
-
-    // P2: 记录要擦除的数字，用于擦除动画
-    const erasedCells = [];
-    if (!noteMode) {
-      // 正常模式：记录被擦除的填数
-      if (board.selectedCells.length > 1) {
-        for (const sc of board.selectedCells) {
-          const cell = board.cells[sc.r][sc.c];
-          if (cell.fillNum) {
-            erasedCells.push({ r: sc.r, c: sc.c, value: cell.fillNum });
-          }
-        }
-      } else if (board.selectedCell) {
-        const cell = board.cells[board.selectedCell.r][board.selectedCell.c];
-        if (cell.fillNum) {
-          erasedCells.push({ r: board.selectedCell.r, c: board.selectedCell.c, value: cell.fillNum });
-        }
-      }
-    }
-
-    // === 模式感知的擦除 ===
-    // 笔记模式：只清除候选数（不清除填数）
-    // 正常模式：清除填数（候选数也一起清除，保持棋盘干净）
-    if (noteMode) {
-      // 笔记模式擦除：只清除候选数
-      if (board.selectedCells.length > 1) {
-        board.eraseCandidatesForSelection();
-      } else if (board.selectedCell || board.selectedCells.length === 1) {
-        board.eraseCandidates();
-      }
-    } else {
-      // 正常模式擦除：清除填数（含候选数）
-      if (board.selectedCells.length > 1) {
-        board.eraseSelection();
-      } else if (board.selectedCell || (board.selectedCells.length === 1)) {
-        board.eraseNumber();
-      }
-    }
-
-    // P2: 触发擦除动画
-    if (renderer && typeof renderer.triggerEraseAnimation === 'function') {
-      for (const ec of erasedCells) {
-        renderer.triggerEraseAnimation(ec.r, ec.c, ec.value, 180);
-      }
-    }
-
-    // 触感反馈
-    vibrate(VIBRATE_PRESETS.ERASE);
-
-    // 连击系统：擦除断连
-    if (comboSystem) {
-      comboSystem.onErase();
-    }
-    // 吐槽系统：擦除也算操作（重置闲置计时）
-    if (comedySystem) {
-      comedySystem.onPlayerAction();
-    }
-    if (window.gameNoteSystem && typeof window.gameNoteSystem.onNumberFilled === 'function') {
-      window.gameNoteSystem.onNumberFilled();
-    }
-    renderer.render(board);
-    updateNumBtnCompletedState();
-    // 更新45法则HUD
-    if (board && board.size === 9 && typeof updateRule45Banner === 'function') {
-      const updateCell = board.selectedCell || (board.selectedCells && board.selectedCells[0]);
-      updateRule45Banner(updateCell);
-    }
-
-    // What If 模式：擦除后自动生成快照
-    if (WhatIfState && WhatIfState.active) {
-      const cell = board.selectedCell || board.selectedCells[0];
-      const label = cell ? `R${cell.r + 1}C${cell.c + 1}=∅` : 'erase';
-      addWhatIfSnapshot(label);
-    }
-    _endProcessing();
+    return cellInputHandler && cellInputHandler.handleErase();
   }
 
-  // === Undo ===
+  // === Undo（已迁移到 core/CellInputHandler.js）===
   function undo() {
-    if (!board) return;
-    if (_isProcessingInput) return;
-    _beginProcessing();
-    // Boss战：记录撤销的位置
-    let undoR = -1, undoC = -1;
-    if (typeof GuideBattle !== 'undefined' && GuideBattle.active && board.selectedCell) {
-      undoR = board.selectedCell.r;
-      undoC = board.selectedCell.c;
-    }
-    board.undo();
-    // Boss战：通知撤销
-    if (typeof GuideBattle !== 'undefined' && GuideBattle.active && undoR >= 0) {
-      GuideBattle.onPlayerUndo(undoR, undoC);
-    }
-    renderer.render(board);
-    EventLogger.log('game:undo');
-    // 更新45法则HUD
-    if (board && board.size === 9 && typeof updateRule45Banner === 'function') {
-      const updateCell = board.selectedCell || (board.selectedCells && board.selectedCells[0]);
-      updateRule45Banner(updateCell);
-    }
-    _endProcessing();
+    return cellInputHandler && cellInputHandler.undo();
   }
 
-  // === Erase ===
+  // === Erase（已迁移到 core/CellInputHandler.js）===
   function eraseCell() {
-    handleErase();
-    EventLogger.log('game:erase');
+    return cellInputHandler && cellInputHandler.eraseCell();
   }
 
-  // === Note Mode ===
+  // === Note Mode（已迁移到 core/CellInputHandler.js）===
   function toggleNoteMode(forceValue) {
-    const newMode = (forceValue !== undefined) ? !!forceValue : !noteMode;
-    if (newMode === noteMode) return; // 状态未变化，不重复触发
-    noteMode = newMode;
-    AudioService.sfx.play('note_toggle');
-
-    // === 即时视觉反馈（< 50ms） ===
-    // 立即更新按钮状态 + 键盘区域视觉提示
-    updateNoteButtonState();
-    // 触感反馈
-    vibrate(noteMode ? VIBRATE_PRESETS.NOTE_TOGGLE : VIBRATE_PRESETS.MICRO);
-
-    // 切换笔记模式时清除多选
-    if (board && board.selectedCells.length > 0) {
-      board.clearMultiSelect();
-      updateMultiSelectHint();
-    }
-    // 同步 board.inputMode（控制候选数显示）
-    if (board) {
-      const targetMode = noteMode ? 'candidate' : 'normal';
-      board.setInputMode(targetMode);
-      // 双重保险：直接设置确保同步
-      if (board.inputMode !== targetMode) {
-        board.inputMode = targetMode;
-      }
-    }
-    EventLogger.log('game:noteMode', { enabled: noteMode });
-
-    // 吐槽系统：首次切换到笔记模式
-    if (noteMode && comedySystem && !usedNotes) {
-      comedySystem.onFirstNote();
-    }
-
-    // 重新渲染（强制重绘，确保笔记显示状态正确）
-    if (renderer && board) {
-      renderer.forceRender = true;
-      renderer.render(board);
-      // 延迟一帧再渲染一次，确保状态同步
-      requestAnimationFrame(() => {
-        if (renderer && board) {
-          renderer.forceRender = true;
-          renderer.render(board);
-        }
-      });
-    }
-
-    // 轻量 Toast 提示（缩短显示时间，避免干扰）
-    showToast(noteMode ? '笔记模式' : '填数模式', 800);
+    return cellInputHandler && cellInputHandler.toggleNoteMode(forceValue);
   }
 
   // ============================================================
-  //  GameContext 中央状态系统（五层联动核心基础设施）
+  //  GameContext 中央状态系统（已迁移到 core/GameContext.js）
   // ============================================================
   //  统一的游戏状态容器，打通"感知→决策→行动"完整数据流
   //  所有层级通过 window.GameContext 读写共享状态
   // ============================================================
 
+  // 向后兼容：_initGameContext 转发到全局 initGameContext
   function _initGameContext() {
-    const GameContext = {
-      // === 玩家状态（感知层写入）===
-      player: {
-        combo: 0,
-        flow: 'cold',           // cold | stale | flow | eureka
-        stuck: false,
-        anxious: false,
-        consecutiveWrong: 0,
-        totalCorrect: 0,
-        totalWrong: 0,
-        lastActionTime: 0,
-        hintUsageCount: 0,
-      },
-      // === 关卡状态（三幕式/游戏循环写入）===
-      level: {
-        act: 1,                 // 1 | 2 | 3
-        simpleFilled: 0,
-        simpleTotal: 0,
-        gateFilled: 0,
-        gateTotal: 0,
-        coreFilled: 0,
-        coreTotal: 0,
-        elapsedTime: 0,
-        levelId: null,
-        chapterId: null,
-        isBossBattle: false,
-      },
-      // === 决策状态（决策层读写）===
-      decision: {
-        lastAction: null,
-        lastActionTime: 0,
-        cooldowns: {},          // { actionKey: expiryTime }
-      },
-      // === 学习状态（学习层读写）===
-      learning: {
-        style: 'balanced',      // precise | experimental | cautious | balanced
-        mastery: {},            // { techniqueId: masteryLevel }
-        accuracyRate: 0,
-        hintUsageRate: 0,
-      },
-
-      // === 便捷方法 ===
-
-      /**
-       * 检查某个动作是否在冷却中
-       * @param {string} key - 冷却键名
-       * @returns {boolean}
-       */
-      isInCooldown(key) {
-        try {
-          return Date.now() < (this.decision.cooldowns[key] || 0);
-        } catch (e) {
-          console.warn('[GameContext] isInCooldown error:', e);
-          return false;
-        }
-      },
-
-      /**
-       * 设置某个动作的冷却时间
-       * @param {string} key - 冷却键名
-       * @param {number} ms - 冷却毫秒数
-       */
-      setCooldown(key, ms) {
-        try {
-          this.decision.cooldowns[key] = Date.now() + ms;
-        } catch (e) {
-          console.warn('[GameContext] setCooldown error:', e);
-        }
-      },
-
-      /**
-       * 批量更新玩家状态
-       * @param {Object} patch - 要更新的玩家状态字段
-       */
-      updatePlayer(patch) {
-        try {
-          Object.assign(this.player, patch);
-          this.player.lastActionTime = Date.now();
-        } catch (e) {
-          console.warn('[GameContext] updatePlayer error:', e);
-        }
-      },
-
-      /**
-       * 批量更新关卡状态
-       * @param {Object} patch - 要更新的关卡状态字段
-       */
-      updateLevel(patch) {
-        try {
-          Object.assign(this.level, patch);
-        } catch (e) {
-          console.warn('[GameContext] updateLevel error:', e);
-        }
-      },
-
-      /**
-       * 批量更新学习状态
-       * @param {Object} patch - 要更新的学习状态字段
-       */
-      updateLearning(patch) {
-        try {
-          Object.assign(this.learning, patch);
-        } catch (e) {
-          console.warn('[GameContext] updateLearning error:', e);
-        }
-      },
-
-      /**
-       * 重置为新关卡初始状态
-       */
-      resetForNewLevel(levelInfo = {}) {
-        try {
-          this.player = {
-            combo: 0,
-            flow: 'cold',
-            stuck: false,
-            anxious: false,
-            consecutiveWrong: 0,
-            totalCorrect: 0,
-            totalWrong: 0,
-            lastActionTime: Date.now(),
-            hintUsageCount: 0,
-          };
-          this.level = Object.assign({
-            act: 1,
-            simpleFilled: 0,
-            simpleTotal: 0,
-            gateFilled: 0,
-            gateTotal: 0,
-            coreFilled: 0,
-            coreTotal: 0,
-            elapsedTime: 0,
-            levelId: null,
-            chapterId: null,
-            isBossBattle: false,
-          }, levelInfo);
-          this.decision = {
-            lastAction: null,
-            lastActionTime: 0,
-            cooldowns: {},
-          };
-          log.info('[GameContext] 已重置为新关卡状态, levelId:', levelInfo.levelId || 'unknown');
-        } catch (e) {
-          console.warn('[GameContext] resetForNewLevel error:', e);
-        }
-      },
-
-      /**
-       * 获取完整状态快照（用于调试/日志）
-       * @returns {Object}
-       */
-      snapshot() {
-        try {
-          return {
-            player: { ...this.player },
-            level: { ...this.level },
-            decision: {
-              lastAction: this.decision.lastAction,
-              lastActionTime: this.decision.lastActionTime,
-              cooldownCount: Object.keys(this.decision.cooldowns).length,
-            },
-            learning: {
-              style: this.learning.style,
-              accuracyRate: this.learning.accuracyRate,
-              hintUsageRate: this.learning.hintUsageRate,
-              masteryCount: Object.keys(this.learning.mastery).length,
-            },
-          };
-        } catch (e) {
-          console.warn('[GameContext] snapshot error:', e);
-          return {};
-        }
-      },
-    };
-
-    // 挂到全局，让各层都能访问
-    global.GameContext = GameContext;
-
-    log.info('[GameContext] 中央状态系统已初始化');
-    return GameContext;
+    if (typeof initGameContext === 'function') {
+      return initGameContext({ logger: log });
+    }
+    return null;
   }
 
   /**
@@ -2824,10 +2497,12 @@
   // === Update Number Pad (转发到 UIManager) ===
   function updateNumPad() { return UIManager.updateNumPad(); }
 
-  // === Number Input ===
+  // === Number Input（已迁移到 core/CellInputHandler.js）===
   function handleNumberInput(num, targetCell) {
-    if (!board) return;
-    const solution = currentLevelData.solution;
+    return cellInputHandler && cellInputHandler.handleNumberInput(num, targetCell);
+  }
+
+  // === Three-Act Guide (三幕式引导) v2 （第六阶段抽离至 game/ThreeActEngine.js） ===
 
     // === 教学引导：guided 阶段输入反馈 ===
     if (lessonUICoordinator && lessonUICoordinator.isWaitingInput) {
@@ -4009,146 +3684,11 @@
 
   }
 
-  // === Game Ending ===
-  function showGameEnding() {
-    const overlay = document.getElementById('complete-overlay');
-    if (overlay) overlay.style.display = 'none';
-
-    // 检查是否是真结局章
-    const isTrueEndingChapter = currentChapterData && currentChapterData.isTrueEnding;
-
-    if (isTrueEndingChapter) {
-      showTrueEnding();
-      return;
-    }
-
-    const ending = document.getElementById('game-ending');
-    if (!ending) {
-      // Fallback: just show a final message
-      if (overlay) {
-        overlay.style.display = 'flex';
-        document.getElementById('complete-grade').textContent = '终';
-        document.getElementById('complete-insight').textContent = '全剧终 — 感谢你的游玩';
-        const btn = document.getElementById('btn-next-level');
-        if (btn) btn.style.display = 'none';
-      }
-      return;
-    }
-
-    ending.style.display = 'flex';
-    ending.style.opacity = '0';
-    requestAnimationFrame(() => {
-      ending.style.transition = 'opacity 1.5s ease';
-      ending.style.opacity = '1';
-    });
-
-    // Add "back to chapter select" button after a delay
-    setTimeout(() => {
-      addEndingReturnButton();
-    }, 4000);
-  }
-
-  // === True Ending ===
-  function showTrueEnding() {
-    if (global.ProgressManager) {
-      ProgressManager.setTrueEndingCleared();
-    }
-
-    const trueEnding = document.getElementById('true-ending');
-    if (!trueEnding) {
-      // Fallback: use normal ending with modified text
-      const ending = document.getElementById('game-ending');
-      if (ending) {
-        const titleEl = ending.querySelector('div > div:nth-child(2)');
-        if (titleEl) titleEl.textContent = '真 · 星辰归途';
-        const subEl = ending.querySelector('div > div:nth-child(1)');
-        if (subEl) subEl.textContent = '— 真结局 —';
-      }
-      showGameEnding();
-      return;
-    }
-
-    trueEnding.style.display = 'flex';
-    trueEnding.style.opacity = '0';
-    requestAnimationFrame(function() {
-      trueEnding.style.transition = 'opacity 2s ease';
-      trueEnding.style.opacity = '1';
-    });
-
-    // Add return button after delay
-    setTimeout(function() {
-      addTrueEndingReturnButton();
-    }, 5000);
-  }
-
-  function addTrueEndingReturnButton() {
-    const ending = document.getElementById('true-ending');
-    if (!ending) return;
-    if (document.getElementById('btn-true-ending-return')) return;
-
-    const btn = document.createElement('button');
-    btn.id = 'btn-true-ending-return';
-    btn.textContent = '返回章节选择';
-    btn.style.cssText = 'margin-top:40px;padding:14px 36px;font-size:16px;' +
-      'background:transparent;border:1px solid #fbbf24;color:#fbbf24;' +
-      'border-radius:8px;cursor:pointer;letter-spacing:3px;transition:all 0.3s;' +
-      'text-shadow:0 0 10px rgba(251,191,36,0.5);';
-    btn.addEventListener('mouseenter', function() {
-      btn.style.background = 'rgba(251,191,36,0.15)';
-      btn.style.boxShadow = '0 0 20px rgba(251,191,36,0.3)';
-    });
-    btn.addEventListener('mouseleave', function() {
-      btn.style.background = 'transparent';
-      btn.style.boxShadow = 'none';
-    });
-    btn.addEventListener('click', function() {
-      ending.style.opacity = '0';
-      setTimeout(function() {
-        ending.style.display = 'none';
-        if (chapterSelect) {
-          chapterSelect._render();
-          chapterSelect.show();
-        }
-      }, 1000);
-    });
-
-    const content = ending.querySelector('div');
-    if (content) content.appendChild(btn);
-  }
-
-  function addEndingReturnButton() {
-    const ending = document.getElementById('game-ending');
-    if (!ending) return;
-    if (document.getElementById('btn-ending-return')) return;
-
-    const btn = document.createElement('button');
-    btn.id = 'btn-ending-return';
-    btn.textContent = '返回章节选择';
-    btn.style.cssText = 'margin-top:40px;padding:12px 32px;font-size:16px;' +
-      'background:transparent;border:1px solid #64748b;color:#94a3b8;' +
-      'border-radius:8px;cursor:pointer;letter-spacing:2px;transition:all 0.3s;';
-    btn.addEventListener('mouseenter', () => {
-      btn.style.borderColor = '#fbbf24';
-      btn.style.color = '#fbbf24';
-    });
-    btn.addEventListener('mouseleave', () => {
-      btn.style.borderColor = '#64748b';
-      btn.style.color = '#94a3b8';
-    });
-    btn.addEventListener('click', () => {
-      ending.style.opacity = '0';
-      setTimeout(() => {
-        ending.style.display = 'none';
-        if (chapterSelect) {
-          chapterSelect._render();
-          chapterSelect.show();
-        }
-      }, 800);
-    });
-
-    const content = ending.querySelector('div');
-    if (content) content.appendChild(btn);
-  }
+  // === Game Ending（已抽离到 story/EndingManager.js）===
+  function showGameEnding() { return EndingManager.showGameEnding(); }
+  function showTrueEnding() { return EndingManager.showTrueEnding(); }
+  function addTrueEndingReturnButton() { return EndingManager.addTrueEndingReturnButton(); }
+  function addEndingReturnButton() { return EndingManager.addEndingReturnButton(); }
 
   // === Character Bubble ===
   /**
@@ -4166,286 +3706,24 @@
    */
   function hideCharacterBubble() { return CharBubble.hide(); }
 
-  // === Expert System Character Handlers ===
-  /**
-   * Register character-based feedback handlers for the expert system.
-   * Replaces plain toast feedback with character dialogue bubbles.
-   */
-  function registerExpertCharacterHandlers() {
-    if (!expertSystem || !expertSystem.expression) return;
+  // === Expert System Character Handlers（已抽离到 expert/ExpertCharacterHandler.js）===
+  function registerExpertCharacterHandlers() { return ExpertCharacterHandler.registerExpertCharacterHandlers(); }
+  function _getExpertDialogText(id) { return ExpertCharacterHandler._getExpertDialogText(id); }
 
-    // Override EUREKA with character bubble + effects
-    expertSystem.expression.registerActionHandler('EUREKA', (params) => {
-      const msg = params.message || '漂亮！连击爆发！';
-      showCharacterBubble('ayan', {
-        text: msg,
-        speakerName: '阿妍',
-        duration: 2500,
-        type: 'eureka',
-      });
-      if (typeof global.Effects !== 'undefined' && typeof global.Effects.triggerLevel === 'function') {
-        global.Effects.triggerLevel(params.level || 3);
-      }
-      if (typeof global.AudioManager !== 'undefined' && typeof global.AudioManager.playEureka === 'function') {
-        global.AudioManager.playEureka();
-      }
-    });
-
-    // Override SHOW_DIALOG with character bubble
-    expertSystem.expression.registerActionHandler('SHOW_DIALOG', (params) => {
-      const dialogId = params.dialogId || 'default';
-      const text = params.text || _getExpertDialogText(dialogId);
-      const charId = params.character || 'cagekeeper';
-      const charName = params.speakerName || (charId === 'cagekeeper' ? '守笼人' : '阿妍');
-      showCharacterBubble(charId, {
-        text: text,
-        speakerName: charName,
-        duration: 3500,
-        type: 'encourage',
-      });
-    });
-
-    // Override SHOW_TOAST - keep for ambient/info, use character bubble for feedback
-    expertSystem.expression.registerActionHandler('SHOW_TOAST', (params) => {
-      const msg = params.message || '';
-      const level = params.level || 'info';
-      // Use character bubble for game-relevant feedback
-      if (level === 'encourage' || params.character) {
-        const charId = params.character || 'cagekeeper';
-        const charName = params.speakerName || (charId === 'cagekeeper' ? '守笼人' : '阿妍');
-        showCharacterBubble(charId, {
-          text: msg,
-          speakerName: charName,
-          duration: 3000,
-          type: 'encourage',
-        });
-      } else {
-        // Fallback to regular toast for system messages
-        showToast(msg, params.duration || 2500);
-      }
-    });
-
-    // Register ENCOURAGE action (new)
-    expertSystem.expression.registerActionHandler('ENCOURAGE', (params) => {
-      const msg = params.message || '别急，慢慢来。';
-      const charId = params.character || 'ying';
-      const charName = params.speakerName || '莹莹';
-      showCharacterBubble(charId, {
-        text: msg,
-        speakerName: charName,
-        duration: 3000,
-        type: 'encourage',
-      });
-    });
-
-    // Register ERROR_FEEDBACK action (new)
-    let _lastErrorFeedbackTime = 0;
-    expertSystem.expression.registerActionHandler('ERROR_FEEDBACK', (params) => {
-      const now = Date.now();
-      // Cooldown: don't repeat error feedback within 5 seconds
-      if (now - _lastErrorFeedbackTime < 5000) return;
-      _lastErrorFeedbackTime = now;
-
-      const msg = params.message || '小心，这格不对哦。';
-      const charId = params.character || 'cagekeeper';
-      const charName = params.speakerName || '守笼人';
-      showCharacterBubble(charId, {
-        text: msg,
-        speakerName: charName,
-        duration: 2000,
-        type: 'error',
-      });
-    });
-
-    // === TRIGGER_HINT: 自动提示（决策层触发）===
-    // 优先级高于 SHOW_TOAST，低于 EUREKA 和 TEACHING
-    expertSystem.expression.registerActionHandler('TRIGGER_HINT', (params) => {
-      // 如果正在播放教学引导，不自动提示
-      if (lessonUICoordinator && lessonUICoordinator.isActive) return;
-
-      // 如果已有提示动画在播放，排队或替换
-      if (typeof HintPlayerState !== 'undefined' && HintPlayerState.playing) {
-        // 已有提示在播放，不打断
-        log.info('[AutoHint] 已有提示在播放，跳过本次自动提示');
-        return;
-      }
-
-      // 执行自动提示
-      showAutoHint(params);
-    });
-
-    log.info('Expert character handlers registered');
-  }
-
-  function _getExpertDialogText(id) {
-    const dialogs = {
-      stuck_guide: '试试换个角度看盘面，或者用笔记标记候选数。',
-      ambient_encouragement: '继续保持，你做得很好。',
-    };
-    return dialogs[id] || '';
-  }
-
-  // === Pause Menu ===
-
-  function togglePause() {
-    if (isPaused) {
-      hidePauseMenu();
-    } else {
-      showPauseMenu();
-    }
-  }
-
-  // === P2 微交互优化 · 统一弹窗管理工具 ===
-  let _modalStack = []; // 弹窗栈，用于多层弹窗时正确管理滚动锁定
-
-  function _lockBodyScroll() {
-    if (!document.body.classList.contains('modal-open')) {
-      document.body.classList.add('modal-open');
-      // 保存当前滚动位置
-      document.body.dataset.scrollTop = window.scrollY || document.documentElement.scrollTop;
-    }
-  }
-
-  function _unlockBodyScroll() {
-    if (_modalStack.length === 0) {
-      document.body.classList.remove('modal-open');
-      // 恢复滚动位置
-      const scrollTop = parseInt(document.body.dataset.scrollTop || '0');
-      if (scrollTop > 0) {
-        window.scrollTo(0, scrollTop);
-      }
-    }
-  }
-
-  function _pushModal(id) {
-    if (_modalStack.indexOf(id) === -1) {
-      _modalStack.push(id);
-      _lockBodyScroll();
-    }
-  }
-
-  function _popModal(id) {
-    const idx = _modalStack.indexOf(id);
-    if (idx !== -1) {
-      _modalStack.splice(idx, 1);
-      _unlockBodyScroll();
-    }
-  }
-
-  function showPauseMenu() {
-    if (isCompleted || isPaused) return;
-    if (!board) return; // 棋盘未初始化时不暂停
-
-    isPaused = true;
-
-    // P2: 锁定背景滚动
-    _pushModal('pause');
-
-    // 暂停计时器
-    if (gameTimer && typeof gameTimer.pause === 'function') {
-      gameTimer.pause();
-    }
-
-    // 暂停 BGM
-    if (typeof AudioService !== 'undefined' && AudioService.bgm) {
-      AudioService.bgm.pause();
-    }
-
-    // 暂停专家系统
-    if (expertSystem && typeof expertSystem.pause === 'function') {
-      expertSystem.pause();
-    }
-
-    // 更新暂停菜单时间显示
-    updatePauseTime();
-
-    // 显示暂停菜单
-    const overlay = document.getElementById('pause-overlay');
-    if (overlay) {
-      overlay.style.display = 'flex';
-      requestAnimationFrame(() => {
-        overlay.style.transition = 'opacity 0.3s ease';
-        overlay.style.opacity = '1';
-        // 添加 pause-show 类触发内容卡片缩放弹入
-        requestAnimationFrame(() => {
-          overlay.classList.add('pause-show');
-        });
-      });
-    }
-  }
-
-  function hidePauseMenu() {
-    if (!isPaused) return;
-    isPaused = false;
-
-    // P2: 解锁背景滚动（延迟到动画结束后）
-    _popModal('pause');
-
-    const overlay = document.getElementById('pause-overlay');
-    if (overlay) {
-      // 先移除缩放，再淡出
-      overlay.classList.remove('pause-show');
-      overlay.style.opacity = '0';
-      setTimeout(() => {
-        if (overlay) overlay.style.display = 'none';
-      }, 300);
-    }
-
-    // 恢复计时器
-    if (gameTimer && typeof gameTimer.resume === 'function') {
-      gameTimer.resume();
-    }
-
-    // 恢复 BGM
-    if (typeof AudioService !== 'undefined' && AudioService.bgm) {
-      AudioService.bgm.resume();
-    }
-
-    // 恢复专家系统
-    if (expertSystem && typeof expertSystem.resume === 'function') {
-      expertSystem.resume();
-    }
-  }
-
-  function updatePauseTime() {
-    const timeEl = document.getElementById('pause-time');
-    if (!timeEl) return;
-
-    let elapsed = 0;
-    if (gameTimer && typeof gameTimer.getTime === 'function') {
-      elapsed = gameTimer.getTime();
-    } else {
-      elapsed = Math.floor((Date.now() - startTime) / 1000);
-    }
-
-    const minutes = Math.floor(elapsed / 60);
-    const seconds = elapsed % 60;
-    timeEl.textContent = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
-  }
-
-  function restartLevel() {
-
-
-    return gameController.restartLevel();
-
-
-  }
-
-  function goToChapterSelect() {
-
-
-    return gameController.goToChapterSelect();
-
-
-  }
-
-  function goToMainMenu() {
-
-
-    return gameController.goToMainMenu();
-
-
-  }
+  // === Pause Menu（已抽离到 ui/PauseManager.js）===
+  function togglePause() { return PauseManager.togglePause(); }
+  function showPauseMenu() { return PauseManager.showPauseMenu(); }
+  function hidePauseMenu() { return PauseManager.hidePauseMenu(); }
+  function updatePauseTime() { return PauseManager.updatePauseTime(); }
+  // 弹窗栈管理工具（转发到 PauseManager）
+  function _lockBodyScroll() { return PauseManager._lockBodyScroll(); }
+  function _unlockBodyScroll() { return PauseManager._unlockBodyScroll(); }
+  function _pushModal(id) { return PauseManager._pushModal(id); }
+  function _popModal(id) { return PauseManager._popModal(id); }
+  // 转发到 GameController
+  function restartLevel() { return PauseManager.restartLevel(); }
+  function goToChapterSelect() { return PauseManager.goToChapterSelect(); }
+  function goToMainMenu() { return PauseManager.goToMainMenu(); }
 
   // === Toast (转发到 UIManager) ===
   function showToast(msg, duration) { return UIManager.showToast(msg, duration); }
