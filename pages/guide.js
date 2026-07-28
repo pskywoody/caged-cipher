@@ -370,6 +370,16 @@
     }
 
     log.info('[Boss] 棋盘已重新初始化为对战关卡');
+
+    // 同步到 ThreeActEngine 和 BossCoordinator（第六阶段抽离）
+    if (threeActEngine) {
+      threeActEngine.setBoard(board);
+      threeActEngine.setRenderer(renderer);
+    }
+    if (bossCoordinator) {
+      bossCoordinator.setBoard(board);
+      bossCoordinator.setRenderer(renderer);
+    }
   }
 
   // === Start Level (full flow) ===
@@ -420,22 +430,10 @@
       }
       comboSystem = null;
     }
-    // 清理连击UI显示
-    const comboContainer = document.getElementById('combo-ui-container');
-    if (comboContainer) comboContainer.classList.remove('show');
-    const flowIndicator = document.getElementById('flow-state-indicator');
-    if (flowIndicator) {
-      flowIndicator.classList.remove('state-stale', 'state-flow', 'state-eureka');
-      flowIndicator.classList.add('state-cold');
+    // 清理连击UI显示（第六阶段抽离至 ui/ComboUIController.js）
+    if (comboUI && typeof comboUI.cleanup === 'function') {
+      comboUI.cleanup();
     }
-    const flowText = document.getElementById('flow-state-text');
-    if (flowText) flowText.textContent = '冷场';
-    const gaugeFill = document.getElementById('combo-gauge-fill');
-    if (gaugeFill) gaugeFill.style.width = '100%';
-    const milestoneOverlay = document.getElementById('milestone-overlay');
-    if (milestoneOverlay) milestoneOverlay.classList.remove('show', 'eureka');
-    const breakOverlay = document.getElementById('combo-break-overlay');
-    if (breakOverlay) breakOverlay.classList.remove('show');
 
     // 清理吐槽系统
     if (comedySystem) {
@@ -445,18 +443,9 @@
       comedySystem = null;
     }
 
-    // 清理Boss战系统
-    if (typeof GuideBattle !== 'undefined' && (GuideBattle.active || GuideBattle.ended)) {
-      GuideBattle.stop();
-    }
-    bossBattleStarted = false;
-    const bossHud = document.getElementById('boss-battle-hud');
-    if (bossHud) bossHud.classList.remove('visible');
-    const bossBubble = document.getElementById('boss-bubble');
-    if (bossBubble) bossBubble.remove();
-    if (GuideBattle && GuideBattle._hudInterval) {
-      clearInterval(GuideBattle._hudInterval);
-      GuideBattle._hudInterval = null;
+    // 清理Boss战系统（第六阶段抽离至 game/BossCoordinator.js）
+    if (bossCoordinator && typeof bossCoordinator.cleanup === 'function') {
+      bossCoordinator.cleanup();
     }
 
     // 清理教学引导系统
@@ -940,6 +929,47 @@
 
   // === GameController 初始化（第四阶段抽离） ===
   function _initGameController() {
+    // === 第六阶段抽离：初始化三幕式引擎 ===
+    if (ThreeActEngine && !threeActEngine) {
+      threeActEngine = new ThreeActEngine({
+        setInteractionLocked: setInteractionLocked,
+        showCharacterBubble: showCharacterBubble,
+        isLastLevelOfChapter: isLastLevelOfChapter,
+      });
+      // 向后兼容：ThreeActGuide 变量指向实例
+      ThreeActGuide = threeActEngine;
+      global.ThreeActGuide = threeActEngine;
+    }
+
+    // === 第六阶段抽离：初始化 Boss 战协调器 ===
+    if (BossCoordinator && !bossCoordinator) {
+      bossCoordinator = new BossCoordinator({
+        setInteractionLocked: setInteractionLocked,
+        restartLevel: restartLevel,
+        showCompleteOverlay: _showCompleteOverlay,
+        goToChapterSelect: goToChapterSelect,
+        unlockBackground: unlockBackground,
+        reinitBoardForBattle: _reinitBoardForBattle,
+        getChapterData: () => currentChapterData,
+        getLevelData: () => currentLevelData,
+        setLevelData: (data, levelId) => {
+          currentLevelData = data;
+          currentLevelId = levelId;
+          // 同步到 gameController
+          if (gameController) {
+            gameController.currentLevelData = data;
+            gameController.currentLevelId = levelId;
+          }
+        },
+      });
+    }
+
+    // === 第六阶段抽离：初始化连击 UI 控制器 ===
+    if (ComboUIController && !comboUI) {
+      comboUI = new ComboUIController();
+      global.comboUI = comboUI;
+    }
+
     gameController = new GameController({
       // 系统对象
       LevelLoader: LevelLoader,
@@ -960,7 +990,7 @@
       GalleryPanelClass: global.GalleryPanel,
       SealAnimationInstance: global.SealAnimationInstance,
       WinConditionManager: global.WinConditionManager,
-      ThreeActGuide: global.ThreeActGuide,
+      ThreeActGuide: threeActEngine,
       GuideBattle: global.GuideBattle,
       Rule45Class: global.Rule45,
       GameContext: global.GameContext,
@@ -1487,6 +1517,27 @@
     renderer = gameController.renderer;
     hintSystem = gameController.hintSystem;
     techMatrix = gameController.techMatrix;
+    // 同步到 ThreeActEngine（第六阶段抽离）
+    if (threeActEngine) {
+      threeActEngine.setBoard(board);
+      threeActEngine.setRenderer(renderer);
+      threeActEngine.setStoryEngine(storyEngine);
+      threeActEngine.setLevelData(currentLevelData);
+      threeActEngine.setChapterData(currentChapterData);
+    }
+    // 同步到 BossCoordinator（第六阶段抽离）
+    if (bossCoordinator) {
+      bossCoordinator.setBoard(board);
+      bossCoordinator.setRenderer(renderer);
+      bossCoordinator.setStoryEngine(storyEngine);
+      bossCoordinator.setLevelData(currentLevelData);
+      bossCoordinator.setChapterData(currentChapterData);
+      bossCoordinator.setGameController(gameController);
+    }
+    // 绑定连击 UI 到 comboSystem（第六阶段抽离）
+    if (comboUI && gameController.comboSystem) {
+      comboUI.bindComboSystem(gameController.comboSystem);
+    }
     // 初始化 WhatIfManager（需要 board 和 renderer）
     _initWhatIfManager();
     // 初始化 HintPlayer 和 NarrationSystem（需要 board/renderer/techMatrix）
