@@ -6,6 +6,8 @@
 
   // 从外部模块加载（物理拆分，逻辑不变）
   const LevelLoader = window.LevelLoader;
+  const UIManager = window.UIManager;
+  const CharBubble = window.CharBubble;
 
   /* ============================================================
      Z-INDEX 层级宪章（与 guide.html :root CSS 变量保持一致）
@@ -89,6 +91,16 @@
 
   // UI elements to hide during story
   const UI_SELECTORS = ['#game-container', '#num-pad', '#toolbar'];
+
+  // 暴露内部状态到全局，供 UIManager / CharBubble 等模块访问
+  Object.defineProperty(global, 'guideNoteMode', {
+    get: function() { return noteMode; },
+    configurable: true,
+  });
+  Object.defineProperty(global, 'guideBoard', {
+    get: function() { return board; },
+    configurable: true,
+  });
 
   // ============================================================
   // 统一震动反馈 (Unified Vibration / Haptic Feedback)
@@ -175,11 +187,6 @@
       window.location.href = url;
     }, delay);
   }
-
-  // Character bubble state
-  let _characterBubbleEl = null;
-  let _characterBubbleTimer = null;
-  let _characterBubbleVisible = false;
 
   // Character portrait emoji mapping (fallback if image not available)
   const CHAR_EMOJI = {
@@ -475,16 +482,8 @@
       renderer.setNoteSystem(null);
     }
 
-    // 清理角色气泡定时器
-    if (_characterBubbleTimer) {
-      clearTimeout(_characterBubbleTimer);
-      _characterBubbleTimer = null;
-    }
-    if (_characterBubbleEl) {
-      _characterBubbleEl.remove();
-      _characterBubbleEl = null;
-    }
-    _characterBubbleVisible = false;
+    // 清理角色气泡
+    CharBubble.hide();
 
     // 清理完成状态标志
     isPaused = false;
@@ -2252,25 +2251,8 @@
     });
   }
 
-  // === UI Visibility ===
-  function setUIVisible(visible) {
-    const opacity = visible ? '1' : '0';
-    const pointerEvents = visible ? 'auto' : 'none';
-    UI_SELECTORS.forEach(sel => {
-      document.querySelectorAll(sel).forEach(el => {
-        el.style.opacity = opacity;
-        el.style.pointerEvents = pointerEvents;
-        el.style.transition = 'opacity 0.5s ease';
-      });
-    });
-
-    // Preserve scene background during gameplay: add/remove game-scene-bg class on body
-    if (visible) {
-      document.body.classList.add('game-scene-bg');
-    } else {
-      document.body.classList.remove('game-scene-bg');
-    }
-  }
+  // === UI Visibility (转发到 UIManager) ===
+  function setUIVisible(visible) { return UIManager.setUIVisible(visible); }
 
   // === Pristine Heatmap Preload ===
   /**
@@ -2417,8 +2399,7 @@
     } else {
       if (banner) banner.style.display = 'none';
       if (pcNotebook) pcNotebook.style.display = 'none';
-      _rule45BannerInited = false;
-      _rule45BannerVisible = false;
+      UIManager.resetRule45Banner();
     }
 
     // Initialize TechMatrix (技术矩阵)
@@ -2853,7 +2834,7 @@
         // 3. 剧情对话播放中
         if (storyEngine && storyEngine._isPlaying) return true;
         // 4. 提示气泡显示中（角色气泡正在显示提示内容）
-        if (_characterBubbleVisible) return true;
+        if (CharBubble.isVisible()) return true;
         // 5. Boss 战中
         if (bossBattleStarted) return true;
         // 6. 暂停或已通关
@@ -4195,51 +4176,8 @@
     }
   }
 
-  // 跟踪上一次各数字的完成状态（用于检测刚完成的瞬间）
-  let _prevNumCompleted = {};
-
-  function updateNumBtnCompletedState() {
-    for (let n = 1; n <= board.size; n++) {
-      let count = 0;
-      for (let r = 0; r < board.size; r++) {
-        for (let c = 0; c < board.size; c++) {
-          const cell = board.cells[r][c];
-          if (cell.fillNum === n || cell.fixedNum === n) count++;
-        }
-      }
-      const isNowCompleted = count >= board.size;
-      const wasCompleted = _prevNumCompleted[n] || false;
-
-      // 更新所有数字按钮（包括移动端和 PC 端）
-      const allBtns = document.querySelectorAll(`.num-btn[data-num="${n}"]`);
-      allBtns.forEach(btn => {
-        btn.classList.toggle('completed', isNowCompleted);
-
-        // 刚完成时触发金色闪光动画
-        if (isNowCompleted && !wasCompleted) {
-          btn.classList.remove('completed-flash');
-          void btn.offsetWidth; // 强制重排
-          btn.classList.add('completed-flash');
-          setTimeout(() => {
-            btn.classList.remove('completed-flash');
-          }, 550);
-        }
-
-        // 更新候选数小数字
-        const countEl = btn.querySelector('.num-count');
-        if (countEl) {
-          countEl.textContent = board.size - count;
-        }
-      });
-
-      _prevNumCompleted[n] = isNowCompleted;
-    }
-    // 更新45法则HUD
-    if (board && board.size === 9 && typeof updateRule45Banner === 'function') {
-      const cell = board.selectedCell || (board.selectedCells && board.selectedCells[0]);
-      updateRule45Banner(cell);
-    }
-  }
+  // 跟踪上一次各数字的完成状态（已迁移到 UIManager）
+  function updateNumBtnCompletedState() { return UIManager.updateNumBtnCompletedState(); }
 
   // === Keyboard Handler ===
   function onKeyDown(e) {
@@ -4656,41 +4594,9 @@
     }
   }
 
-  function updateMultiSelectHint() {
-    const hint = document.getElementById('multi-select-hint');
-    if (!hint) return;
-    const count = board.selectedCells.length;
-    if (count > 1) {
-      hint.textContent = `已选中 ${count} 格 · 笔记模式`;
-      hint.classList.add('show');
-    } else {
-      hint.textContent = '';
-      hint.classList.remove('show');
-    }
-    // 更新45法则HUD
-    if (board && board.size === 9 && typeof updateRule45Banner === 'function') {
-      const cell = board.selectedCell || (board.selectedCells && board.selectedCells[0]);
-      updateRule45Banner(cell);
-    }
-  }
+  function updateMultiSelectHint() { return UIManager.updateMultiSelectHint(); }
 
-  function updateNoteButtonState() {
-    const btn = document.getElementById('btn-note');
-    if (btn) btn.classList.toggle('active', noteMode);
-    // 同步到 PC 端
-    const pcBtn = document.getElementById('pc-btn-note');
-    if (pcBtn) pcBtn.classList.toggle('active', noteMode);
-    // 同步键盘区域笔记模式视觉提示（移动端）
-    const numPad = document.getElementById('num-pad');
-    if (numPad) numPad.classList.toggle('note-mode-active', noteMode);
-    const noteIndicator = document.getElementById('note-mode-indicator');
-    if (noteIndicator) noteIndicator.classList.toggle('show', noteMode);
-    // 同步键盘区域笔记模式视觉提示（PC端）
-    const pcNumPad = document.getElementById('pc-num-pad');
-    if (pcNumPad) pcNumPad.classList.toggle('note-mode-active', noteMode);
-    const pcNoteIndicator = document.getElementById('pc-note-mode-indicator');
-    if (pcNoteIndicator) pcNoteIndicator.classList.toggle('show', noteMode);
-  }
+  function updateNoteButtonState() { return UIManager.updateNoteButtonState(); }
 
   function handleErase() {
     if (_isProcessingInput) return;
@@ -5567,202 +5473,12 @@
     });
   }
 
-  // === Rule45 Banner (顶部常驻 HUD) ===
-  let _rule45BannerInited = false;
-  let _rule45BannerVisible = true; // 45法则HUD是否显示
-
-  function initRule45Banner() {
-    if (_rule45BannerInited) return;
-    const banner = document.getElementById('rule45-banner');
-    if (!banner) return;
-    _rule45BannerInited = true;
-    banner.style.display = 'block';
-  }
-
-  function showRule45Banner() {
-    const banner = document.getElementById('rule45-banner');
-    if (banner) {
-      banner.style.display = 'block';
-    }
-    // PC 端同步显示
-    const pcNotebook = document.getElementById('pc-rule45-notebook');
-    if (pcNotebook) {
-      pcNotebook.style.display = '';
-    }
-    _rule45BannerVisible = true;
-  }
-
-  function hideRule45Banner() {
-    const banner = document.getElementById('rule45-banner');
-    if (banner) {
-      banner.style.display = 'none';
-    }
-    // PC 端同步隐藏
-    const pcNotebook = document.getElementById('pc-rule45-notebook');
-    if (pcNotebook) {
-      pcNotebook.style.display = 'none';
-    }
-    _rule45BannerVisible = false;
-  }
-
-  /**
-   * 切换 45 法则 HUD 显示/隐藏
-   */
-  function toggleRule45Banner() {
-    if (_rule45BannerVisible) {
-      hideRule45Banner();
-      showToast('已隐藏 45 法则仪表盘', 1000);
-    } else {
-      showRule45Banner();
-      showToast('已显示 45 法则仪表盘', 1000);
-    }
-  }
-
-  function updateRule45Banner(cell) {
-    const banner = document.getElementById('rule45-banner');
-    if (!banner || !board || board.size !== 9) return;
-
-    let row = 0, col = 0;
-    if (cell) {
-      row = cell.r !== undefined ? cell.r : cell.row;
-      col = cell.c !== undefined ? cell.c : cell.col;
-    } else if (board.selectedCell) {
-      row = board.selectedCell.r;
-      col = board.selectedCell.c;
-    } else if (board.selectedCells && board.selectedCells.length > 0) {
-      row = board.selectedCells[0].r;
-      col = board.selectedCells[0].c;
-    }
-
-    // 计算行信息
-    let rowSum = 0, rowEmpty = 0;
-    for (let c = 0; c < board.size; c++) {
-      const cell = board.cells[row][c];
-      if (cell.fillNum || cell.fixedNum) {
-        rowSum += cell.fillNum || cell.fixedNum;
-      } else {
-        rowEmpty++;
-      }
-    }
-    const rowDiff = 45 - rowSum;
-
-    // 计算列信息
-    let colSum = 0, colEmpty = 0;
-    for (let r = 0; r < board.size; r++) {
-      const cell = board.cells[r][col];
-      if (cell.fillNum || cell.fixedNum) {
-        colSum += cell.fillNum || cell.fixedNum;
-      } else {
-        colEmpty++;
-      }
-    }
-    const colDiff = 45 - colSum;
-
-    // 计算宫信息
-    const boxW = 3, boxH = 3;
-    const boxRow = Math.floor(row / boxH);
-    const boxCol = Math.floor(col / boxW);
-    let boxSum = 0, boxEmpty = 0;
-    for (let r = boxRow * boxH; r < (boxRow + 1) * boxH; r++) {
-      for (let c = boxCol * boxW; c < (boxCol + 1) * boxW; c++) {
-        const cell = board.cells[r][c];
-        if (cell.fillNum || cell.fixedNum) {
-          boxSum += cell.fillNum || cell.fixedNum;
-        } else {
-          boxEmpty++;
-        }
-      }
-    }
-    const boxDiff = 45 - boxSum;
-
-    // 更新行/列/宫数据
-    document.getElementById('r45-row-label').textContent = `行${row + 1}·剩${rowEmpty}`;
-    document.getElementById('r45-row-data').innerHTML = `${rowSum}<span class="r45-diff">/45</span> <span class="r45-remain">差${rowDiff}</span>`;
-
-    document.getElementById('r45-col-label').textContent = `列${col + 1}·剩${colEmpty}`;
-    document.getElementById('r45-col-data').innerHTML = `${colSum}<span class="r45-diff">/45</span> <span class="r45-remain">差${colDiff}</span>`;
-
-    const boxNum = boxRow * 3 + boxCol + 1;
-    document.getElementById('r45-box-label').textContent = `宫${boxNum}·剩${boxEmpty}`;
-    document.getElementById('r45-box-data').innerHTML = `${boxSum}<span class="r45-diff">/45</span> <span class="r45-remain">差${boxDiff}</span>`;
-
-    // 计算当前选中格子所在笼子的信息
-    const cageTitleEl = document.getElementById('r45-cage-title');
-    const cageCombosEl = document.getElementById('r45-cage-combos');
-    
-    if (board.cages && board.cages.length > 0 && (cell || (board.selectedCells && board.selectedCells.length > 0))) {
-      // 找到包含当前格子的笼子（最外层）
-      let currentCage = null;
-      for (const cage of board.cages) {
-        if (cage.cells.some(cc => cc[0] === row && cc[1] === col)) {
-          currentCage = cage;
-          break;
-        }
-      }
-
-      if (currentCage) {
-        // 计算笼子当前和
-        let cageSum = 0;
-        let cageEmpty = 0;
-        const usedNums = [];
-        for (const cc of currentCage.cells) {
-          const c = board.cells[cc[0]][cc[1]];
-          if (c.fillNum || c.fixedNum) {
-            const num = c.fillNum || c.fixedNum;
-            cageSum += num;
-            if (!usedNums.includes(num)) usedNums.push(num);
-          } else {
-            cageEmpty++;
-          }
-        }
-        const remain = currentCage.sum - cageSum;
-
-        cageTitleEl.textContent = `笼 ${currentCage.sum}·${cageSum} (剩${remain})`;
-
-        // 计算可能的组合（排除已使用的数字）
-        if (cageEmpty > 0 && typeof Rule45 !== 'undefined' && Rule45.findCombinations) {
-          try {
-            const combos = Rule45.findCombinations(cageEmpty, remain, null, [], usedNums);
-            cageCombosEl.innerHTML = '';
-            const displayCombos = combos.slice(0, 8); // 最多显示8个
-            for (const combo of displayCombos) {
-              const pill = document.createElement('span');
-              pill.className = 'r45-combo-pill';
-              pill.textContent = '[' + combo.join(',') + ']';
-              cageCombosEl.appendChild(pill);
-            }
-            if (combos.length > 8) {
-              const more = document.createElement('span');
-              more.style.cssText = 'font-size:11px;color:#6b7280;margin-left:4px;';
-              more.textContent = `+${combos.length - 8}种`;
-              cageCombosEl.appendChild(more);
-            }
-            if (combos.length === 0) {
-              const none = document.createElement('span');
-              none.style.cssText = 'font-size:11px;color:#ef4444;margin-left:4px;';
-              none.textContent = '无解';
-              cageCombosEl.appendChild(none);
-            }
-          } catch (e) {
-            cageCombosEl.innerHTML = '<span style="font-size:11px;color:#6b7280;">组合计算中...</span>';
-          }
-        } else {
-          cageCombosEl.innerHTML = '<span style="font-size:11px;color:#6b7280;">已填满</span>';
-        }
-      } else {
-        cageTitleEl.textContent = '未选中笼子';
-        cageCombosEl.innerHTML = '<span style="font-size:11px;color:#6b7280;">点击格子查看笼子组合</span>';
-      }
-    } else {
-      cageTitleEl.textContent = '选择格子查看';
-      cageCombosEl.innerHTML = '<span style="font-size:11px;color:#6b7280;">点击任意格子查看行列宫及笼子信息</span>';
-    }
-
-    // 同步到 PC 端面板
-    if (typeof _syncRule45ToPc === 'function') {
-      _syncRule45ToPc();
-    }
-  }
+  // === Rule45 Banner (顶部常驻 HUD) - 已迁移到 UIManager ===
+  function initRule45Banner() { return UIManager.initRule45Banner(); }
+  function showRule45Banner() { return UIManager.showRule45Banner(); }
+  function hideRule45Banner() { return UIManager.hideRule45Banner(); }
+  function toggleRule45Banner() { return UIManager.toggleRule45Banner(); }
+  function updateRule45Banner(cell) { return UIManager.updateRule45Banner(cell); }
 
   // ============================================================
   //  提示播放器（Hint Player）- 动画式推理展示
@@ -7678,24 +7394,8 @@
     return hintCount < getMaxHints();
   }
 
-  // === Update Number Pad ===
-  function updateNumPad() {
-    const maxNum = board ? board.size : 9;
-    document.querySelectorAll('.num-btn').forEach(btn => {
-      const num = parseInt(btn.dataset.num);
-      btn.style.display = num <= maxNum ? '' : 'none';
-    });
-    // 动态调整 grid 列数，确保按钮居中（4x4=4列，6x6=6列，9x9=9列）
-    const numPad = document.getElementById('num-pad');
-    if (numPad) {
-      numPad.style.gridTemplateColumns = `repeat(${maxNum}, 1fr)`;
-    }
-    // PC 端数字键盘同步
-    const pcNumPad = document.getElementById('pc-num-pad');
-    if (pcNumPad) {
-      pcNumPad.style.gridTemplateColumns = `repeat(${maxNum}, 1fr)`;
-    }
-  }
+  // === Update Number Pad (转发到 UIManager) ===
+  function updateNumPad() { return UIManager.updateNumPad(); }
 
   // === Number Input ===
   function handleNumberInput(num, targetCell) {
@@ -8299,6 +7999,7 @@
 
         // 初始化启用状态
         _enabled = isEnabled(currentLevelData);
+        UIManager.setThreeActEnabled(_enabled);
         _act1Started = false;
         _act2Triggered = false;
         _act3Triggered = false;
@@ -8549,115 +8250,19 @@
 
     /**
      * 更新棋盘上方三幕指示灯（圆点 + 文字）
+     * 转发到 UIManager
      * @param {number} act - 幕次 1/2/3，或 'complete' 表示通关
      */
     function _updateThreeActDot(act) {
-      const dotIndicator = document.getElementById('three-act-indicator');
-      if (!dotIndicator) return;
-
-      if (!_enabled) {
-        dotIndicator.style.display = 'none';
-        return;
-      }
-
-      const labelEl = dotIndicator.querySelector('.three-act-label');
-      // 清除旧的幕次 class
-      dotIndicator.classList.remove('act-1', 'act-2', 'act-3', 'act-complete');
-
-      // 判断是否是切换（之前有值，现在换了一个）
-      const wasActive = dotIndicator.style.display !== 'none' && act !== null;
-
-      if (act === 1) {
-        dotIndicator.classList.add('act-1');
-        if (labelEl) labelEl.textContent = '突破';
-        dotIndicator.style.display = 'flex';
-      } else if (act === 2) {
-        dotIndicator.classList.add('act-2');
-        if (labelEl) labelEl.textContent = '破局';
-        dotIndicator.style.display = 'flex';
-      } else if (act === 3) {
-        dotIndicator.classList.add('act-3');
-        if (labelEl) labelEl.textContent = '收尾';
-        dotIndicator.style.display = 'flex';
-      } else if (act === 'complete') {
-        dotIndicator.classList.add('act-complete');
-        if (labelEl) labelEl.textContent = '通关';
-        dotIndicator.style.display = 'flex';
-      } else {
-        dotIndicator.style.display = 'none';
-      }
-
-      // 切换时的光晕爆发动画
-      if (wasActive || act === 'complete') {
-        dotIndicator.classList.remove('act-switching');
-        // 强制重排以重新触发动画
-        void dotIndicator.offsetWidth;
-        dotIndicator.classList.add('act-switching');
-        setTimeout(() => {
-          dotIndicator.classList.remove('act-switching');
-        }, 450);
-      }
+      return UIManager.updateThreeActDot(act);
     }
 
     /**
      * 更新顶部幕次指示器（文本 + 进度条）
+     * 转发到 UIManager
      */
     function _updateActIndicator(stats) {
-      const indicator = document.getElementById('act-indicator');
-      const textEl = document.getElementById('act-indicator-text');
-      const fillEl = document.getElementById('act-indicator-fill');
-
-      if (!_enabled || !stats) {
-        if (indicator) indicator.style.display = 'none';
-        _updateThreeActDot(null);
-        return;
-      }
-
-      // 判断当前幕次
-      const simpleDone = stats.simple.total > 0 && stats.simple.filled >= stats.simple.total;
-      const gateDone = stats.gate.total > 0 && stats.gate.filled >= stats.gate.total;
-
-      let actName, actColor, current, total, actNum;
-
-      if (!simpleDone && stats.simple.total > 0) {
-        // 第一幕
-        actName = '第一幕·速填';
-        actColor = '#22c55e';
-        current = stats.simple.filled;
-        total = stats.simple.total;
-        actNum = 1;
-      } else if (!gateDone && stats.gate.total > 0) {
-        // 第二幕
-        actName = '第二幕·破局';
-        actColor = '#ef4444';
-        current = stats.gate.filled;
-        total = stats.gate.total;
-        actNum = 2;
-      } else if (stats.core.total > 0) {
-        // 第三幕
-        actName = '第三幕·雪崩';
-        actColor = '#fbbf24';
-        current = stats.core.filled;
-        total = stats.core.total;
-        actNum = 3;
-      } else {
-        if (indicator) indicator.style.display = 'none';
-        _updateThreeActDot(null);
-        return;
-      }
-
-      // 更新顶部进度条指示器
-      if (indicator && textEl && fillEl) {
-        indicator.style.display = 'flex';
-        textEl.textContent = actName;
-        textEl.style.color = actColor;
-        fillEl.style.background = actColor;
-        const progress = total > 0 ? (current / total) * 100 : 0;
-        fillEl.style.width = progress + '%';
-      }
-
-      // 更新棋盘上方圆点指示灯
-      _updateThreeActDot(actNum);
+      return UIManager.updateActIndicator(stats);
     }
 
     // ============================================================
@@ -8767,6 +8372,7 @@
       // 此函数保留用于向后兼容，实际引导在 startLevel 的钩子中触发
       if (!currentLevelData) return;
       _enabled = isEnabled(currentLevelData);
+      UIManager.setThreeActEnabled(_enabled);
       _act1Started = false;
       _act2Triggered = false;
       _act3Triggered = false;
@@ -8833,6 +8439,7 @@
       resetBgm();
 
       _enabled = false;
+      UIManager.setThreeActEnabled(false);
       _act1Started = false;
       _act2Triggered = false;
       _act3Triggered = false;
@@ -11317,124 +10924,19 @@
 
   // === Character Bubble ===
   /**
-   * Show a lightweight character speech bubble.
-   * Used for hints, encouragement, eureka moments, error feedback.
-   * Position: top-right area near the board, with character avatar + text.
-   *
-   * @param {string} characterId - character ID (ayan, cagekeeper, ying, etc.)
-   * @param {Object} options - { text, speakerName, duration, type, onClick }
+   * Show a lightweight character speech bubble (转发到 CharBubble).
    */
-  function showCharacterBubble(characterId, options) {
-    options = options || {};
-    const text = options.text || '';
-    const speakerName = options.speakerName || '';
-    const duration = options.duration || 3000;
-    const type = options.type || 'info'; // info, hint, eureka, encourage, error
-    const onClick = options.onClick || null;
-
-    // Remove existing bubble
-    if (_characterBubbleEl) {
-      _characterBubbleEl.remove();
-      _characterBubbleEl = null;
-    }
-    if (_characterBubbleTimer) {
-      clearTimeout(_characterBubbleTimer);
-      _characterBubbleTimer = null;
-    }
-
-    _characterBubbleVisible = true;
-
-    // Create bubble element
-    const bubble = document.createElement('div');
-    bubble.className = 'char-bubble char-bubble-' + type;
-    _characterBubbleEl = bubble;
-
-    const emoji = CHAR_EMOJI[characterId] || '💬';
-
-    // Build inner HTML with avatar + text (using CSS classes instead of inline styles)
-    bubble.innerHTML =
-      '<div class="char-bubble-avatar">' + emoji + '</div>' +
-      '<div class="char-bubble-content">' +
-        (speakerName ? '<div class="char-bubble-name">' + speakerName + '</div>' : '') +
-        '<div class="char-bubble-text">' +
-          formatBubbleText(text, type) +
-        '</div>' +
-      '</div>' +
-      '<div class="char-bubble-close" title="点击关闭">✕</div>';
-
-    // Append to correct container based on layout
-    // PC mode: place inside pc-board-container near top-right of board
-    // Mobile mode: append to body (fixed position)
-    if (_isPcLayout) {
-      const boardContainer = document.getElementById('pc-board-container');
-      if (boardContainer) {
-        boardContainer.appendChild(bubble);
-      } else {
-        document.body.appendChild(bubble);
-      }
-    } else {
-      document.body.appendChild(bubble);
-    }
-
-    // Animate in using classList
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        bubble.classList.add('show');
-      });
-    });
-
-    // Click to dismiss — only on close button, text area is selectable
-    const closeBtn = bubble.querySelector('.char-bubble-close');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        hideCharacterBubble();
-      });
-    }
-
-    // Optional click handler for the whole bubble
-    if (onClick) {
-      bubble.addEventListener('click', (e) => {
-        // Don't trigger if clicking the close button
-        if (e.target.closest('.char-bubble-close')) return;
-        onClick(e);
-      });
-    }
-
-    // Auto-dismiss
-    _characterBubbleTimer = setTimeout(() => {
-      hideCharacterBubble();
-    }, duration);
-  }
+  function showCharacterBubble(characterId, options) { return CharBubble.show(characterId, options); }
 
   /**
-   * Format bubble text with technique name highlighting.
+   * Format bubble text with technique name highlighting (转发到 CharBubble).
    */
-  function formatBubbleText(text, type) {
-    // Highlight technique name in 【brackets】
-    return text.replace(/【([^】]+)】/g,
-      '<span class="tech-highlight">【$1】</span>');
-  }
+  function formatBubbleText(text, type) { return CharBubble.format(text, type); }
 
   /**
-   * Hide the current character bubble.
+   * Hide the current character bubble (转发到 CharBubble).
    */
-  function hideCharacterBubble() {
-    if (!_characterBubbleEl) return;
-    const bubble = _characterBubbleEl;
-    _characterBubbleEl = null;
-    _characterBubbleVisible = false;
-
-    if (_characterBubbleTimer) {
-      clearTimeout(_characterBubbleTimer);
-      _characterBubbleTimer = null;
-    }
-
-    bubble.classList.remove('show');
-    setTimeout(() => {
-      if (bubble.parentNode) bubble.remove();
-    }, 300);
-  }
+  function hideCharacterBubble() { return CharBubble.hide(); }
 
   // === Expert System Character Handlers ===
   /**
@@ -11722,67 +11224,9 @@
     navigateTo('menu.html');
   }
 
-  // === Toast ===
-  const _toastQueue = [];
-  const _MAX_TOASTS = 2;
-
-  function showToast(msg, duration) {
-    duration = duration || 2500;
-
-    // 检查当前显示的 toast 数量
-    const activeToasts = document.querySelectorAll('.game-toast.show').length;
-
-    if (activeToasts >= _MAX_TOASTS) {
-      // 加入队列，等当前 toast 消失后再显示
-      _toastQueue.push({ msg, duration });
-      return;
-    }
-
-    _createToast(msg, duration);
-  }
-
-  function _createToast(msg, duration) {
-    const toast = document.createElement('div');
-    toast.className = 'game-toast';
-    toast.textContent = msg;
-
-    // PC 模式下放在左侧面板，移动端放在 body
-    if (_isPcLayout) {
-      const leftPanel = document.getElementById('pc-left-panel');
-      if (leftPanel) {
-        leftPanel.appendChild(toast);
-      } else {
-        document.body.appendChild(toast);
-      }
-    } else {
-      document.body.appendChild(toast);
-    }
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        toast.classList.add('show');
-      });
-    });
-
-    setTimeout(() => {
-      toast.classList.remove('show');
-      setTimeout(() => {
-        toast.remove();
-        // 显示队列中的下一个 toast
-        _processToastQueue();
-      }, 300);
-    }, duration);
-  }
-
-  function _processToastQueue() {
-    if (_toastQueue.length === 0) return;
-
-    const activeToasts = document.querySelectorAll('.game-toast.show').length;
-    if (activeToasts < _MAX_TOASTS) {
-      const next = _toastQueue.shift();
-      _createToast(next.msg, next.duration);
-    }
-  }
+  // === Toast (转发到 UIManager) ===
+  function showToast(msg, duration) { return UIManager.showToast(msg, duration); }
+  function hideToast() { return UIManager.hideToast(); }
 
   // === 调试工具集（在控制台使用）
   // ============================================================
@@ -12117,6 +11561,11 @@
   // ============================================================
 
   let _isPcLayout = false;
+  // 暴露到全局供 UIManager / CharBubble 使用
+  Object.defineProperty(global, '_isPcLayout', {
+    get: function() { return _isPcLayout; },
+    configurable: true,
+  });
   let _layoutResizeTimer = null;
 
   /**
@@ -12164,8 +11613,9 @@
       pcBoardContainer.appendChild(climaxOverlay);
     }
     // 移动角色气泡到 PC 棋盘容器内（如果正在显示）
-    if (_characterBubbleEl && _characterBubbleEl.parentNode) {
-      pcBoardContainer.appendChild(_characterBubbleEl);
+    const bubbleEl = CharBubble.getElement();
+    if (bubbleEl && bubbleEl.parentNode) {
+      pcBoardContainer.appendChild(bubbleEl);
     }
     if (longPressHalo) {
       longPressHalo.style.display = 'none';
@@ -12226,8 +11676,9 @@
       document.body.appendChild(climaxOverlay);
     }
     // 移动角色气泡回 body（如果正在显示）
-    if (_characterBubbleEl && _characterBubbleEl.parentNode) {
-      document.body.appendChild(_characterBubbleEl);
+    const bubbleElMobile = CharBubble.getElement();
+    if (bubbleElMobile && bubbleElMobile.parentNode) {
+      document.body.appendChild(bubbleElMobile);
     }
 
     // 清除标记
@@ -12256,46 +11707,9 @@
   }
 
   /**
-   * 同步 45法则 数据到 PC 端面板
-   * 在移动端 rule45 更新时调用，同步到 PC 面板
+   * 同步 45法则 数据到 PC 端面板（转发到 UIManager）
    */
-  function _syncRule45ToPc() {
-    if (!_isPcLayout) return;
-
-    // 同步行/列/宫数据
-    const mobileRowLabel = document.getElementById('r45-row-label');
-    const pcRowLabel = document.getElementById('pc-r45-row-label');
-    if (mobileRowLabel && pcRowLabel) pcRowLabel.innerHTML = mobileRowLabel.innerHTML;
-
-    const mobileRowData = document.getElementById('r45-row-data');
-    const pcRowData = document.getElementById('pc-r45-row-data');
-    if (mobileRowData && pcRowData) pcRowData.innerHTML = mobileRowData.innerHTML;
-
-    const mobileColLabel = document.getElementById('r45-col-label');
-    const pcColLabel = document.getElementById('pc-r45-col-label');
-    if (mobileColLabel && pcColLabel) pcColLabel.innerHTML = mobileColLabel.innerHTML;
-
-    const mobileColData = document.getElementById('r45-col-data');
-    const pcColData = document.getElementById('pc-r45-col-data');
-    if (mobileColData && pcColData) pcColData.innerHTML = mobileColData.innerHTML;
-
-    const mobileBoxLabel = document.getElementById('r45-box-label');
-    const pcBoxLabel = document.getElementById('pc-r45-box-label');
-    if (mobileBoxLabel && pcBoxLabel) pcBoxLabel.innerHTML = mobileBoxLabel.innerHTML;
-
-    const mobileBoxData = document.getElementById('r45-box-data');
-    const pcBoxData = document.getElementById('pc-r45-box-data');
-    if (mobileBoxData && pcBoxData) pcBoxData.innerHTML = mobileBoxData.innerHTML;
-
-    // 同步笼子信息
-    const mobileCageTitle = document.getElementById('r45-cage-title');
-    const pcCageTitle = document.getElementById('pc-r45-cage-title');
-    if (mobileCageTitle && pcCageTitle) pcCageTitle.innerHTML = mobileCageTitle.innerHTML;
-
-    const mobileCageCombos = document.getElementById('r45-cage-combos');
-    const pcCageCombos = document.getElementById('pc-r45-cage-combos');
-    if (mobileCageCombos && pcCageCombos) pcCageCombos.innerHTML = mobileCageCombos.innerHTML;
-  }
+  function _syncRule45ToPc() { return UIManager._syncRule45ToPc(); }
 
   /**
    * 同步 What If 快照数据到 PC 端面板
