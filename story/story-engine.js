@@ -571,6 +571,7 @@
     // ============================================================
 
     _playNext() {
+      try {
       this._stopTypewriter();
       // Reset sync state for new line
       this._voicePlaying = false;
@@ -624,6 +625,11 @@
 
       // Handle character dialogue
       this._showDialogue(line);
+      } catch (e) {
+        console.error('[StoryEngine] _playNext error:', e);
+        // 兜底：出错时强制结束场景，避免UI卡死
+        this._endScene();
+      }
     }
 
     _endScene() {

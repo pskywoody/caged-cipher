@@ -315,6 +315,8 @@
         onUpdateRule45Banner: deps.updateRule45Banner,
         onResetRule45Banner: () => UIManager.resetRule45Banner(),
         onUpdateNumBtnCompletedState: deps.updateNumBtnCompletedState,
+        onUpdateNumPad: deps.updateNumPad,
+        onAfterInitBoard: deps.onAfterInitBoard || function() {},
         onUpdateNoteButtonState: deps.updateNoteButtonState,
         onHidePauseMenu: deps.hidePauseMenu,
         onNavigateTo: deps.navigateTo,

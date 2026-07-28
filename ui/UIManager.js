@@ -48,7 +48,7 @@ const UIManager = (function() {
   }
 
   // === 依赖注入 - 从全局获取（guide.js 会挂载这些） ===
-  function _getBoard() { return window.guideBoard || window.board; }
+  function _getBoard() { return window.guideBoard || window.gameBoard || window.board; }
   function _getNoteMode() { return window.guideNoteMode !== undefined ? window.guideNoteMode : false; }
   function _isPcLayout() { return window._isPcLayout || false; }
 

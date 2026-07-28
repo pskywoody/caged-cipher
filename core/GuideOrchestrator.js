@@ -484,6 +484,8 @@
         updateNoteButtonState: ctx.updateNoteButtonState,
         updateRule45Banner: ctx.updateRule45Banner,
         updateNumBtnCompletedState: ctx.updateNumBtnCompletedState,
+        updateNumPad: ctx.updateNumPad,
+        onAfterInitBoard: ctx.onAfterInitBoard,
         hidePauseMenu: ctx.hidePauseMenu,
         toggleNoteMode: ctx.toggleNoteMode,
         recordTechniqueUsage: ctx.recordTechniqueUsage,

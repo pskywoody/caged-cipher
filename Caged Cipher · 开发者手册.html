@@ -5847,6 +5847,24 @@ _fillCell(row, col, num, technique) {
 </thead>
 <tbody>
   <tr>
+    <td><span style="color:var(--success)">已修复</span></td>
+    <td><strong>棋盘无法点击</strong>：关卡启动后，点击棋盘任何位置都无反应。<br>
+      <strong>根因</strong>：<code>bindEvents()</code> 从未被调用，InputRouter 未创建，canvas 事件未绑定。<br>
+      <strong>修复方案</strong>：在 GameController.initBoard 末尾添加 <code>onAfterInitBoard</code> 回调，调用 <code>bindEvents()</code> 绑定输入事件。需注意在绑定前先同步 board/renderer 引用到闭包。
+    </td>
+    <td>input-router / event-binder</td>
+    <td>已修复</td>
+  </tr>
+  <tr>
+    <td><span style="color:var(--success)">已修复</span></td>
+    <td><strong>数字键盘显示异常</strong>：4x4/6x6 棋盘上仍然显示 9 个数字按钮，且剩余数量全显示为 9。<br>
+      <strong>根因</strong>：<code>updateNumPad()</code> 和 <code>updateNumBtnCompletedState()</code> 未在 initBoard 时调用。<br>
+      <strong>修复方案</strong>：在 GameController.initBoard 中添加 <code>onUpdateNumPad</code> 回调调整按钮数量，确保 <code>onUpdateNumBtnCompletedState</code> 正确计算剩余数量。
+    </td>
+    <td>num-pad / ui</td>
+    <td>已修复</td>
+  </tr>
+  <tr>
     <td><span style="color:var(--error)">P0</span></td>
     <td><strong>角色气泡位置偏移</strong>：部分场景下角色气泡定位不准确，超出屏幕边界或覆盖重要游戏元素</td>
     <td>bubble-system</td>

@@ -141,6 +141,8 @@
 
   /**
    * 交互锁定
+   * 注意：必须同时恢复 #game-container 的 pointer-events，
+   * 因为 setUIVisible(false) 会给 UI_SELECTORS（包含 #game-container）设置 pointer-events: none
    */
   function setInteractionLocked(locked) {
     const canvas = document.getElementById('gameCanvas');
@@ -148,14 +150,32 @@
     document.querySelectorAll('.num-btn, #toolbar button').forEach(el => {
       el.style.pointerEvents = locked ? 'none' : '';
     });
+    // 关键：恢复 game-container 的 pointer-events（setUIVisible 可能将其设为 none）
+    const gameContainer = document.getElementById('game-container');
+    if (gameContainer) {
+      gameContainer.style.pointerEvents = locked ? 'none' : '';
+    }
+    // 同时恢复 num-pad（也在 UI_SELECTORS 中）
+    const numPad = document.getElementById('num-pad');
+    if (numPad) {
+      numPad.style.pointerEvents = locked ? 'none' : '';
+    }
+    // 恢复 toolbar
+    const toolbar = document.getElementById('toolbar');
+    if (toolbar) {
+      toolbar.style.pointerEvents = locked ? 'none' : '';
+    }
   }
 
   // ============================================================
   //  查找章节
   // ============================================================
   function findChapter() {
-    if (!currentLevelData || !global.CHAPTER_DATA) return;
-    const numId = parseInt(currentLevelId);
+    // 优先从 gameController 获取数据（解决值拷贝不同步问题）
+    const levelData = (gameController && gameController.currentLevelData) || currentLevelData;
+    const levelId = (gameController && gameController.currentLevelId) != null ? gameController.currentLevelId : currentLevelId;
+    if (!levelData || !global.CHAPTER_DATA) return;
+    const numId = parseInt(levelId);
     const chapterId = Math.floor(numId / 100);
     for (const ch of global.CHAPTER_DATA.chapters) {
       if (ch.chapterId === chapterId) {
@@ -163,6 +183,10 @@
         // 同步到 ctx（解决值拷贝不同步问题）
         if (orchestrator && orchestrator.ctx) {
           orchestrator.ctx.currentChapterData = ch;
+        }
+        // 同步到 gameController
+        if (gameController) {
+          gameController.currentChapterData = ch;
         }
         return;
       }
@@ -176,15 +200,20 @@
     return null;
   }
   function isFirstLevelOfChapter() {
-    if (!currentChapterData || !currentChapterData.levels) return false;
-    const normalLevels = currentChapterData.levels.filter(l => !l.isHidden);
-    return normalLevels.length > 0 && normalLevels[0].levelId === currentLevelId;
+    // 优先从 gameController 获取数据（解决值拷贝不同步问题）
+    const chapterData = (gameController && gameController.currentChapterData) || currentChapterData;
+    const levelId = (gameController && gameController.currentLevelId) != null ? gameController.currentLevelId : currentLevelId;
+    if (!chapterData || !chapterData.levels) return false;
+    const normalLevels = chapterData.levels.filter(l => !l.isHidden);
+    return normalLevels.length > 0 && normalLevels[0].levelId === levelId;
   }
   function isLastLevelOfChapter() {
-    if (!currentChapterData || !currentChapterData.levels) return false;
-    const normalLevels = currentChapterData.levels.filter(l => !l.isHidden);
+    const chapterData = (gameController && gameController.currentChapterData) || currentChapterData;
+    const levelId = (gameController && gameController.currentLevelId) != null ? gameController.currentLevelId : currentLevelId;
+    if (!chapterData || !chapterData.levels) return false;
+    const normalLevels = chapterData.levels.filter(l => !l.isHidden);
     if (normalLevels.length === 0) return false;
-    return parseInt(normalLevels[normalLevels.length - 1].levelId) === parseInt(currentLevelId);
+    return parseInt(normalLevels[normalLevels.length - 1].levelId) === parseInt(levelId);
   }
   function isLastChapterOfGame() {
     if (!global.CHAPTER_DATA || !global.CHAPTER_DATA.chapters) return false;
@@ -251,7 +280,7 @@
       // 回调函数
       showToast, showCharacterBubble, setUIVisible, setInteractionLocked,
       vibrate, navigateTo, updateNoteButtonState, updateRule45Banner,
-      updateNumBtnCompletedState, hidePauseMenu, toggleNoteMode,
+      updateNumBtnCompletedState, updateNumPad, hidePauseMenu, toggleNoteMode,
       recordTechniqueUsage, isLastLevelOfChapter, isFirstLevelOfChapter,
       isLastChapterOfGame, findChapter, findChapterById, initRule45Banner,
       playClimaxAnimation, playClearDialog, playChapterEpilogue,
@@ -262,6 +291,37 @@
       goToChapterSelect, unlockBackground, _reinitBoardForBattle,
       _cleanupLevelState, _startLessonPlayer, loadLevel, initBoard, startLevel,
       calculateGrade, checkAchievements, updateNextLevelButton,
+    };
+    // 棋盘初始化完成回调：绑定事件、同步 inputRouter
+    ctx.onAfterInitBoard = function() {
+      // 先从 ctx 获取 gameController（闭包变量可能还没同步）
+      const gc = ctx.gameController || (orchestrator && orchestrator.ctx && orchestrator.ctx.gameController);
+      // 先同步 board/renderer 到闭包（确保 bindEvents 使用正确的引用）
+      if (gc) {
+        board = gc.board;
+        renderer = gc.renderer;
+        hintSystem = gc.hintSystem;
+        techMatrix = gc.techMatrix;
+        comboSystem = gc.comboSystem;
+        comedySystem = gc.comedySystem;
+        // 同步 gameController 到闭包
+        gameController = gc;
+      }
+      // 同时同步到 ctx
+      ctx.board = board;
+      ctx.renderer = renderer;
+      ctx.hintSystem = hintSystem;
+      ctx.techMatrix = techMatrix;
+      ctx.comboSystem = comboSystem;
+      ctx.comedySystem = comedySystem;
+      
+      bindEvents();
+      // 同步 inputRouter 回 ctx
+      ctx.inputRouter = inputRouter;
+      // 同步到 orchestrator.ctx
+      if (orchestrator && orchestrator.ctx) {
+        orchestrator.ctx.inputRouter = inputRouter;
+      }
     };
     // 让 ctx 可以访问到自身的属性（用于 getter 闭包）
     orchestrator = new GuideOrchestrator(ctx);
@@ -403,7 +463,18 @@
   // ============================================================
   function setupChapterSelect() { orchestrator.setupChapterSelect(); }
 
-  function initBoard(levelData) { return orchestrator.initBoard(levelData); }
+  function initBoard(levelData) {
+    const result = orchestrator.initBoard(levelData);
+    // 绑定事件（首次 initBoard 时绑定，确保 board/renderer 已就绪）
+    bindEvents();
+    // 更新数字键盘显示（根据棋盘尺寸显示/隐藏数字按钮）
+    updateNumPad();
+    // 同步 inputRouter 回闭包（bindEvents 后才创建）
+    if (orchestrator && orchestrator.ctx) {
+      orchestrator.ctx.inputRouter = inputRouter;
+    }
+    return result;
+  }
 
   // ============================================================
   //  教学引导（转发到 LessonUICoordinator）

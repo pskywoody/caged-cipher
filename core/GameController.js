@@ -100,6 +100,8 @@
       this.onSetInteractionLocked = options.onSetInteractionLocked || function() {};
       this.onUpdateRule45Banner = options.onUpdateRule45Banner || function() {};
       this.onUpdateNumBtnCompletedState = options.onUpdateNumBtnCompletedState || function() {};
+      this.onUpdateNumPad = options.onUpdateNumPad || function() {};
+      this.onAfterInitBoard = options.onAfterInitBoard || function() {};
       this.onUpdateNoteButtonState = options.onUpdateNoteButtonState || function() {};
       this.onResetRule45Banner = options.onResetRule45Banner || function() {};
       this.onHidePauseMenu = options.onHidePauseMenu || function() {};
@@ -234,6 +236,16 @@
     }
 
     /**
+     * 判断当前关卡是否是章节的第一关（内部实现，不依赖外部回调）
+     * @returns {boolean}
+     */
+    _isFirstLevelOfChapter() {
+      if (!this.currentChapterData || !this.currentChapterData.levels) return false;
+      const normalLevels = this.currentChapterData.levels.filter(l => !l.isHidden);
+      return normalLevels.length > 0 && normalLevels[0].levelId === this.currentLevelId;
+    }
+
+    /**
      * 开始关卡
      */
     async startLevel(levelId) {
@@ -256,7 +268,11 @@
       if (this.gameTimer) this.gameTimer.pauseForDialog();
 
       // Play prologue (first level of chapter only)
-      if (this.onIsFirstLevelOfChapter()) {
+      // 优先用内部判断（更可靠），fallback 到外部回调
+      const isFirstLevel = this._isFirstLevelOfChapter();
+      if (isFirstLevel && this.onPlayPrologue) {
+        await this.onPlayPrologue();
+      } else if (this.onIsFirstLevelOfChapter && this.onIsFirstLevelOfChapter()) {
         await this.onPlayPrologue();
       }
 
@@ -326,6 +342,13 @@
       document.querySelectorAll('.num-btn, #toolbar button').forEach(el => {
         el.style.pointerEvents = '';
       });
+      // 确保 game-container 可点击（剧情隐藏UI后可能残留 pointer-events: none）
+      const gameContainer = document.getElementById('game-container');
+      if (gameContainer) gameContainer.style.pointerEvents = '';
+      // 确保 UI 可见（剧情异常结束后可能残留隐藏状态）
+      if (typeof this.onSetUIVisible === 'function') {
+        this.onSetUIVisible(true);
+      }
       // 确保技术矩阵是关闭的
       if (this.techMatrix && typeof this.techMatrix.hide === 'function') {
         this.techMatrix.hide();
@@ -605,6 +628,28 @@
           this.renderer.forceRender = true;
           this.renderer.render(this.board);
         }
+      }
+
+      // 同步 board 到全局（确保 UIManager.updateNumBtnCompletedState 等能获取到 board）
+      // UIManager._getBoard() 返回 window.guideBoard || window.board
+      if (this.board) {
+        window.guideBoard = this.board;
+        window.board = this.board;
+      }
+
+      // 更新数字键盘显示（根据棋盘尺寸显示/隐藏数字按钮）
+      if (typeof this.onUpdateNumPad === 'function') {
+        this.onUpdateNumPad();
+      }
+
+      // 更新数字键盘剩余次数显示
+      if (typeof this.onUpdateNumBtnCompletedState === 'function') {
+        this.onUpdateNumBtnCompletedState();
+      }
+
+      // 棋盘初始化完成回调（用于绑定事件等后续操作）
+      if (typeof this.onAfterInitBoard === 'function') {
+        this.onAfterInitBoard();
       }
     }
 
