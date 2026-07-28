@@ -3,6 +3,50 @@
 const UIManager = (function() {
   'use strict';
 
+  // ===== P1 关键路径加固：安全 DOM 操作辅助函数 =====
+  const _domWarned = {};
+
+  function _getEl(id) {
+    const el = document.getElementById(id);
+    if (!el) {
+      if (!_domWarned[id]) {
+        console.warn('[DOM] 元素不存在:', id);
+        _domWarned[id] = true;
+      }
+    }
+    return el;
+  }
+
+  function _setText(id, text) {
+    const el = _getEl(id);
+    if (el) el.textContent = text;
+  }
+
+  function _setHtml(id, html) {
+    const el = _getEl(id);
+    if (el) el.innerHTML = html;
+  }
+
+  function _show(id) {
+    const el = _getEl(id);
+    if (el) el.style.display = '';
+  }
+
+  function _hide(id) {
+    const el = _getEl(id);
+    if (el) el.style.display = 'none';
+  }
+
+  function _setStyle(id, prop, value) {
+    const el = _getEl(id);
+    if (el) el.style[prop] = value;
+  }
+
+  function _toggleClass(id, className, force) {
+    const el = _getEl(id);
+    if (el) el.classList.toggle(className, force);
+  }
+
   // === 依赖注入 - 从全局获取（guide.js 会挂载这些） ===
   function _getBoard() { return window.guideBoard || window.board; }
   function _getNoteMode() { return window.guideNoteMode !== undefined ? window.guideNoteMode : false; }
@@ -58,21 +102,15 @@ const UIManager = (function() {
   // ============================================================
   function updateNoteButtonState() {
     const noteMode = _getNoteMode();
-    const btn = document.getElementById('btn-note');
-    if (btn) btn.classList.toggle('active', noteMode);
+    _toggleClass('btn-note', 'active', noteMode);
     // 同步到 PC 端
-    const pcBtn = document.getElementById('pc-btn-note');
-    if (pcBtn) pcBtn.classList.toggle('active', noteMode);
+    _toggleClass('pc-btn-note', 'active', noteMode);
     // 同步键盘区域笔记模式视觉提示（移动端）
-    const numPad = document.getElementById('num-pad');
-    if (numPad) numPad.classList.toggle('note-mode-active', noteMode);
-    const noteIndicator = document.getElementById('note-mode-indicator');
-    if (noteIndicator) noteIndicator.classList.toggle('show', noteMode);
+    _toggleClass('num-pad', 'note-mode-active', noteMode);
+    _toggleClass('note-mode-indicator', 'show', noteMode);
     // 同步键盘区域笔记模式视觉提示（PC端）
-    const pcNumPad = document.getElementById('pc-num-pad');
-    if (pcNumPad) pcNumPad.classList.toggle('note-mode-active', noteMode);
-    const pcNoteIndicator = document.getElementById('pc-note-mode-indicator');
-    if (pcNoteIndicator) pcNoteIndicator.classList.toggle('show', noteMode);
+    _toggleClass('pc-num-pad', 'note-mode-active', noteMode);
+    _toggleClass('pc-note-mode-indicator', 'show', noteMode);
   }
 
   // ============================================================
@@ -127,11 +165,11 @@ const UIManager = (function() {
   // ============================================================
   function updateMultiSelectHint() {
     const board = _getBoard();
-    const hint = document.getElementById('multi-select-hint');
+    const hint = _getEl('multi-select-hint');
     if (!hint) return;
     const count = board.selectedCells.length;
     if (count > 1) {
-      hint.textContent = `已选中 ${count} 格 · 笔记模式`;
+      hint.textContent = '已选中 ' + count + ' 格 · 笔记模式';
       hint.classList.add('show');
     } else {
       hint.textContent = '';
@@ -155,14 +193,14 @@ const UIManager = (function() {
       btn.style.display = num <= maxNum ? '' : 'none';
     });
     // 动态调整 grid 列数，确保按钮居中（4x4=4列，6x6=6列，9x9=9列）
-    const numPad = document.getElementById('num-pad');
+    const numPad = _getEl('num-pad');
     if (numPad) {
-      numPad.style.gridTemplateColumns = `repeat(${maxNum}, 1fr)`;
+      numPad.style.gridTemplateColumns = 'repeat(' + maxNum + ', 1fr)';
     }
     // PC 端数字键盘同步
-    const pcNumPad = document.getElementById('pc-num-pad');
+    const pcNumPad = _getEl('pc-num-pad');
     if (pcNumPad) {
-      pcNumPad.style.gridTemplateColumns = `repeat(${maxNum}, 1fr)`;
+      pcNumPad.style.gridTemplateColumns = 'repeat(' + maxNum + ', 1fr)';
     }
   }
 
@@ -171,19 +209,19 @@ const UIManager = (function() {
   // ============================================================
   function initRule45Banner() {
     if (_rule45BannerInited) return;
-    const banner = document.getElementById('rule45-banner');
+    const banner = _getEl('rule45-banner');
     if (!banner) return;
     _rule45BannerInited = true;
     banner.style.display = 'block';
   }
 
   function showRule45Banner() {
-    const banner = document.getElementById('rule45-banner');
+    const banner = _getEl('rule45-banner');
     if (banner) {
       banner.style.display = 'block';
     }
     // PC 端同步显示
-    const pcNotebook = document.getElementById('pc-rule45-notebook');
+    const pcNotebook = _getEl('pc-rule45-notebook');
     if (pcNotebook) {
       pcNotebook.style.display = '';
     }
@@ -191,12 +229,12 @@ const UIManager = (function() {
   }
 
   function hideRule45Banner() {
-    const banner = document.getElementById('rule45-banner');
+    const banner = _getEl('rule45-banner');
     if (banner) {
       banner.style.display = 'none';
     }
     // PC 端同步隐藏
-    const pcNotebook = document.getElementById('pc-rule45-notebook');
+    const pcNotebook = _getEl('pc-rule45-notebook');
     if (pcNotebook) {
       pcNotebook.style.display = 'none';
     }
@@ -275,20 +313,21 @@ const UIManager = (function() {
     const boxDiff = 45 - boxSum;
 
     // 更新行/列/宫数据
-    document.getElementById('r45-row-label').textContent = `行${row + 1}·剩${rowEmpty}`;
-    document.getElementById('r45-row-data').innerHTML = `${rowSum}<span class="r45-diff">/45</span> <span class="r45-remain">差${rowDiff}</span>`;
+    _setText('r45-row-label', '行' + (row + 1) + '·剩' + rowEmpty);
+    _setHtml('r45-row-data', rowSum + '<span class="r45-diff">/45</span> <span class="r45-remain">差' + rowDiff + '</span>');
 
-    document.getElementById('r45-col-label').textContent = `列${col + 1}·剩${colEmpty}`;
-    document.getElementById('r45-col-data').innerHTML = `${colSum}<span class="r45-diff">/45</span> <span class="r45-remain">差${colDiff}</span>`;
+    _setText('r45-col-label', '列' + (col + 1) + '·剩' + colEmpty);
+    _setHtml('r45-col-data', colSum + '<span class="r45-diff">/45</span> <span class="r45-remain">差' + colDiff + '</span>');
 
     const boxNum = boxRow * 3 + boxCol + 1;
-    document.getElementById('r45-box-label').textContent = `宫${boxNum}·剩${boxEmpty}`;
-    document.getElementById('r45-box-data').innerHTML = `${boxSum}<span class="r45-diff">/45</span> <span class="r45-remain">差${boxDiff}</span>`;
+    _setText('r45-box-label', '宫' + boxNum + '·剩' + boxEmpty);
+    _setHtml('r45-box-data', boxSum + '<span class="r45-diff">/45</span> <span class="r45-remain">差' + boxDiff + '</span>');
 
     // 计算当前选中格子所在笼子的信息
-    const cageTitleEl = document.getElementById('r45-cage-title');
-    const cageCombosEl = document.getElementById('r45-cage-combos');
-    
+    const cageTitleEl = _getEl('r45-cage-title');
+    const cageCombosEl = _getEl('r45-cage-combos');
+
+    if (cageTitleEl && cageCombosEl) {
     if (board.cages && board.cages.length > 0 && (cell || (board.selectedCells && board.selectedCells.length > 0))) {
       // 找到包含当前格子的笼子（最外层）
       let currentCage = null;
@@ -316,7 +355,7 @@ const UIManager = (function() {
         }
         const remain = currentCage.sum - cageSum;
 
-        cageTitleEl.textContent = `笼 ${currentCage.sum}·${cageSum} (剩${remain})`;
+        cageTitleEl.textContent = '笼 ' + currentCage.sum + '·' + cageSum + ' (剩' + remain + ')';
 
         // 计算可能的组合（排除已使用的数字）
         if (cageEmpty > 0 && typeof Rule45 !== 'undefined' && Rule45.findCombinations) {
@@ -333,7 +372,7 @@ const UIManager = (function() {
             if (combos.length > 8) {
               const more = document.createElement('span');
               more.style.cssText = 'font-size:11px;color:#6b7280;margin-left:4px;';
-              more.textContent = `+${combos.length - 8}种`;
+              more.textContent = '+' + (combos.length - 8) + '种';
               cageCombosEl.appendChild(more);
             }
             if (combos.length === 0) {
@@ -356,6 +395,7 @@ const UIManager = (function() {
       cageTitleEl.textContent = '选择格子查看';
       cageCombosEl.innerHTML = '<span style="font-size:11px;color:#6b7280;">点击任意格子查看行列宫及笼子信息</span>';
     }
+    } // cageTitleEl && cageCombosEl
 
     // 同步到 PC 端面板
     if (typeof _syncRule45ToPc === 'function') {
@@ -367,37 +407,37 @@ const UIManager = (function() {
     if (!_isPcLayout()) return;
 
     // 同步行/列/宫数据
-    const mobileRowLabel = document.getElementById('r45-row-label');
-    const pcRowLabel = document.getElementById('pc-r45-row-label');
+    const mobileRowLabel = _getEl('r45-row-label');
+    const pcRowLabel = _getEl('pc-r45-row-label');
     if (mobileRowLabel && pcRowLabel) pcRowLabel.innerHTML = mobileRowLabel.innerHTML;
 
-    const mobileRowData = document.getElementById('r45-row-data');
-    const pcRowData = document.getElementById('pc-r45-row-data');
+    const mobileRowData = _getEl('r45-row-data');
+    const pcRowData = _getEl('pc-r45-row-data');
     if (mobileRowData && pcRowData) pcRowData.innerHTML = mobileRowData.innerHTML;
 
-    const mobileColLabel = document.getElementById('r45-col-label');
-    const pcColLabel = document.getElementById('pc-r45-col-label');
+    const mobileColLabel = _getEl('r45-col-label');
+    const pcColLabel = _getEl('pc-r45-col-label');
     if (mobileColLabel && pcColLabel) pcColLabel.innerHTML = mobileColLabel.innerHTML;
 
-    const mobileColData = document.getElementById('r45-col-data');
-    const pcColData = document.getElementById('pc-r45-col-data');
+    const mobileColData = _getEl('r45-col-data');
+    const pcColData = _getEl('pc-r45-col-data');
     if (mobileColData && pcColData) pcColData.innerHTML = mobileColData.innerHTML;
 
-    const mobileBoxLabel = document.getElementById('r45-box-label');
-    const pcBoxLabel = document.getElementById('pc-r45-box-label');
+    const mobileBoxLabel = _getEl('r45-box-label');
+    const pcBoxLabel = _getEl('pc-r45-box-label');
     if (mobileBoxLabel && pcBoxLabel) pcBoxLabel.innerHTML = mobileBoxLabel.innerHTML;
 
-    const mobileBoxData = document.getElementById('r45-box-data');
-    const pcBoxData = document.getElementById('pc-r45-box-data');
+    const mobileBoxData = _getEl('r45-box-data');
+    const pcBoxData = _getEl('pc-r45-box-data');
     if (mobileBoxData && pcBoxData) pcBoxData.innerHTML = mobileBoxData.innerHTML;
 
     // 同步笼子信息
-    const mobileCageTitle = document.getElementById('r45-cage-title');
-    const pcCageTitle = document.getElementById('pc-r45-cage-title');
+    const mobileCageTitle = _getEl('r45-cage-title');
+    const pcCageTitle = _getEl('pc-r45-cage-title');
     if (mobileCageTitle && pcCageTitle) pcCageTitle.innerHTML = mobileCageTitle.innerHTML;
 
-    const mobileCageCombos = document.getElementById('r45-cage-combos');
-    const pcCageCombos = document.getElementById('pc-r45-cage-combos');
+    const mobileCageCombos = _getEl('r45-cage-combos');
+    const pcCageCombos = _getEl('pc-r45-cage-combos');
     if (mobileCageCombos && pcCageCombos) pcCageCombos.innerHTML = mobileCageCombos.innerHTML;
   }
 
@@ -438,7 +478,7 @@ const UIManager = (function() {
 
     // PC 模式下放在左侧面板，移动端放在 body
     if (_isPcLayout()) {
-      const leftPanel = document.getElementById('pc-left-panel');
+      const leftPanel = _getEl('pc-left-panel');
       if (leftPanel) {
         leftPanel.appendChild(toast);
       } else {
@@ -484,7 +524,7 @@ const UIManager = (function() {
    */
   function _updateThreeActDot(act) {
     const _enabled = _threeActEnabled;
-    const dotIndicator = document.getElementById('three-act-indicator');
+    const dotIndicator = _getEl('three-act-indicator');
     if (!dotIndicator) return;
 
     if (!_enabled) {
@@ -536,9 +576,9 @@ const UIManager = (function() {
    */
   function _updateActIndicator(stats) {
     const _enabled = _threeActEnabled;
-    const indicator = document.getElementById('act-indicator');
-    const textEl = document.getElementById('act-indicator-text');
-    const fillEl = document.getElementById('act-indicator-fill');
+    const indicator = _getEl('act-indicator');
+    const textEl = _getEl('act-indicator-text');
+    const fillEl = _getEl('act-indicator-fill');
 
     if (!_enabled || !stats) {
       if (indicator) indicator.style.display = 'none';

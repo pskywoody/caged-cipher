@@ -69,6 +69,58 @@
       // === 便捷方法 ===
 
       /**
+       * 安全读取嵌套属性（P1加固）
+       * 路径不存在或读取失败时返回默认值，不抛异常
+       * @param {string} path - 点分隔的属性路径，如 'player.combo'、'level.actParams.aiSpeedMultiplier'
+       * @param {*} [defaultValue] - 默认值
+       * @returns {*} 属性值或默认值
+       */
+      safeGet(path, defaultValue) {
+        try {
+          if (!path || typeof path !== 'string') return defaultValue;
+          const keys = path.split('.');
+          let current = this;
+          for (let i = 0; i < keys.length; i++) {
+            if (current == null) return defaultValue;
+            current = current[keys[i]];
+          }
+          return current === undefined ? defaultValue : current;
+        } catch (e) {
+          console.warn('[GameContext] safeGet error, path:', path, e.message);
+          return defaultValue;
+        }
+      },
+
+      /**
+       * 安全写入嵌套属性（P1加固）
+       * 路径不存在时自动创建中间对象，写入失败时静默
+       * @param {string} path - 点分隔的属性路径，如 'player.combo'
+       * @param {*} value - 要设置的值
+       * @returns {boolean} 是否写入成功
+       */
+      safeSet(path, value) {
+        try {
+          if (!path || typeof path !== 'string') return false;
+          const keys = path.split('.');
+          if (keys.length === 0) return false;
+
+          let current = this;
+          for (let i = 0; i < keys.length - 1; i++) {
+            const key = keys[i];
+            if (current[key] == null || typeof current[key] !== 'object') {
+              current[key] = {};
+            }
+            current = current[key];
+          }
+          current[keys[keys.length - 1]] = value;
+          return true;
+        } catch (e) {
+          console.warn('[GameContext] safeSet error, path:', path, e.message);
+          return false;
+        }
+      },
+
+      /**
        * 检查某个动作是否在冷却中
        * @param {string} key - 冷却键名
        * @returns {boolean}

@@ -18,6 +18,20 @@
 ;(function(global) {
   'use strict';
 
+  // ===== P1 关键路径加固：安全 DOM 操作辅助函数 =====
+  const _domWarned = {};
+
+  function _getEl(id) {
+    const el = document.getElementById(id);
+    if (!el) {
+      if (!_domWarned[id]) {
+        console.warn('[DOM][ComboUIController] 元素不存在:', id);
+        _domWarned[id] = true;
+      }
+    }
+    return el;
+  }
+
   // 心流状态文本映射
   const FLOW_STATE_TEXT = {
     cold: '冷场',
@@ -75,15 +89,15 @@
     // ============================================================
 
     _initDOM() {
-      this._container = document.getElementById('combo-ui-container');
-      this._flowIndicator = document.getElementById('flow-state-indicator');
-      this._flowText = document.getElementById('flow-state-text');
-      this._numberEl = document.getElementById('combo-ui-number');
-      this._labelEl = document.getElementById('combo-ui-label');
-      this._gaugeContainer = document.getElementById('combo-gauge-container');
-      this._gaugeFill = document.getElementById('combo-gauge-fill');
-      this._milestoneOverlay = document.getElementById('milestone-overlay');
-      this._breakOverlay = document.getElementById('combo-break-overlay');
+      this._container = _getEl('combo-ui-container');
+      this._flowIndicator = _getEl('flow-state-indicator');
+      this._flowText = _getEl('flow-state-text');
+      this._numberEl = _getEl('combo-ui-number');
+      this._labelEl = _getEl('combo-ui-label');
+      this._gaugeContainer = _getEl('combo-gauge-container');
+      this._gaugeFill = _getEl('combo-gauge-fill');
+      this._milestoneOverlay = _getEl('milestone-overlay');
+      this._breakOverlay = _getEl('combo-break-overlay');
     }
 
     // ============================================================

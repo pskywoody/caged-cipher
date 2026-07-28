@@ -173,9 +173,12 @@
       });
 
       // Close button
-      panel.querySelector('#tech-panel-close').addEventListener('click', () => {
-        this.hide();
-      });
+      const closeBtn = panel.querySelector('#tech-panel-close');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          this.hide();
+        });
+      }
 
       this._onVisibilityChange(true);
     }

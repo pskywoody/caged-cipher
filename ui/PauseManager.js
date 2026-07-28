@@ -5,6 +5,25 @@
 ;(function(global) {
   'use strict';
 
+  // ===== P1 关键路径加固：安全 DOM 操作辅助函数 =====
+  const _domWarned = {};
+
+  function _getEl(id) {
+    const el = document.getElementById(id);
+    if (!el) {
+      if (!_domWarned[id]) {
+        console.warn('[DOM][PauseManager] 元素不存在:', id);
+        _domWarned[id] = true;
+      }
+    }
+    return el;
+  }
+
+  function _setText(id, text) {
+    const el = _getEl(id);
+    if (el) el.textContent = text;
+  }
+
   // === 依赖引用（由 guide.js 在初始化时注入）===
   let _deps = {
     isPaused: () => false,
@@ -110,7 +129,7 @@
     updatePauseTime();
 
     // 显示暂停菜单
-    const overlay = document.getElementById('pause-overlay');
+    const overlay = _getEl('pause-overlay');
     if (overlay) {
       overlay.style.display = 'flex';
       requestAnimationFrame(() => {
@@ -131,7 +150,7 @@
     // P2: 解锁背景滚动（延迟到动画结束后）
     _popModal('pause');
 
-    const overlay = document.getElementById('pause-overlay');
+    const overlay = _getEl('pause-overlay');
     if (overlay) {
       // 先移除缩放，再淡出
       overlay.classList.remove('pause-show');
@@ -161,7 +180,7 @@
   }
 
   function updatePauseTime() {
-    const timeEl = document.getElementById('pause-time');
+    const timeEl = _getEl('pause-time');
     if (!timeEl) return;
 
     let elapsed = 0;

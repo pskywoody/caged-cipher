@@ -483,6 +483,12 @@ class Renderer {
     // 简化渲染标记（低画质）
     this._simplifiedCageRendering = false;
     this._heatmapRenderingSuspended = false;
+
+    // ===== P1 关键路径加固：渲染降级 =====
+    this._renderFailCount = 0;          // 连续失败计数
+    this._permanentFallback = false;    // 永久降级模式标志
+    this._lastRenderError = null;       // 最后一次渲染错误
+    this._debugMode = false;            // debug 模式（控制日志输出）
   }
 
   /**
@@ -3831,6 +3837,7 @@ class Renderer {
   /**
    * 主渲染入口
    * P2优化：使用requestAnimationFrame节流，避免同步重复渲染
+   * P1加固：失败降级 + 连续失败永久降级模式
    */
   render(board) {
     this._currentBoard = board;
@@ -3840,15 +3847,47 @@ class Renderer {
     requestAnimationFrame(() => {
       this._renderPending = false;
       if (!this._currentBoard) return;
+
+      // 永久降级模式：直接走降级路径
+      if (this._permanentFallback) {
+        try {
+          this._renderFallback(this._currentBoard);
+        } catch (e) {
+          if (this._debugMode) {
+            console.error('[Renderer] 永久降级模式下渲染仍失败:', e.message);
+          }
+        }
+        return;
+      }
+
       try {
         this._doRender(this._currentBoard);
+        // 渲染成功，渐进式降低失败计数（不完全清零，避免抖动）
+        if (this._renderFailCount > 0) {
+          this._renderFailCount = Math.max(0, this._renderFailCount - 0.5);
+        }
       } catch (e) {
-        console.error('[Renderer] render error:', e);
-        // 降级：基础渲染，保证不白屏
+        this._lastRenderError = e;
+        this._renderFailCount++;
+
+        // 第一次失败用 warn，后续失败只在 debug 模式输出
+        if (this._renderFailCount <= 1) {
+          console.warn('[Renderer] 渲染失败，使用降级渲染:', e.message);
+        } else if (this._debugMode) {
+          console.warn('[Renderer] 渲染失败 (第' + this._renderFailCount + '次):', e.message);
+        }
+
+        // 连续失败 3 次，进入永久降级模式
+        if (this._renderFailCount >= 3) {
+          this._permanentFallback = true;
+          console.warn('[Renderer] 连续失败 3 次，进入永久降级模式');
+        }
+
+        // 尝试降级渲染
         try {
           this._renderFallback(this._currentBoard);
         } catch (e2) {
-          console.error('[Renderer] fallback also failed:', e2);
+          console.error('[Renderer] 降级渲染也失败了:', e2.message);
         }
       }
     });
@@ -3856,17 +3895,48 @@ class Renderer {
 
   /**
    * 强制立即渲染（跳过节流，用于需要同步刷新的场景）
+   * P1加固：失败降级 + 连续失败永久降级模式
    */
   renderImmediate(board) {
     this._currentBoard = board;
+
+    // 永久降级模式：直接走降级路径
+    if (this._permanentFallback) {
+      try {
+        this._renderFallback(board);
+      } catch (e) {
+        if (this._debugMode) {
+          console.error('[Renderer] 永久降级模式下渲染仍失败:', e.message);
+        }
+      }
+      return;
+    }
+
     try {
       this._doRender(board);
+      // 渲染成功，渐进式降低失败计数
+      if (this._renderFailCount > 0) {
+        this._renderFailCount = Math.max(0, this._renderFailCount - 0.5);
+      }
     } catch (e) {
-      console.error('[Renderer] renderImmediate error:', e);
+      this._lastRenderError = e;
+      this._renderFailCount++;
+
+      if (this._renderFailCount <= 1) {
+        console.warn('[Renderer] renderImmediate 渲染失败，使用降级渲染:', e.message);
+      } else if (this._debugMode) {
+        console.warn('[Renderer] renderImmediate 渲染失败 (第' + this._renderFailCount + '次):', e.message);
+      }
+
+      if (this._renderFailCount >= 3) {
+        this._permanentFallback = true;
+        console.warn('[Renderer] 连续失败 3 次，进入永久降级模式');
+      }
+
       try {
         this._renderFallback(board);
       } catch (e2) {
-        console.error('[Renderer] fallback also failed:', e2);
+        console.error('[Renderer] 降级渲染也失败了:', e2.message);
       }
     }
   }
@@ -4002,27 +4072,29 @@ class Renderer {
 
   /**
    * 降级渲染：最基础的棋盘+数字，保证不白屏
+   * P1加固：尽量简单，用最基础的 Canvas API
+   * 支持 4x4 / 6x6 / 9x9 棋盘
    */
   _renderFallback(board) {
     this.recalcCellSize(board);
     this._currentBoard = board;
-    const { ctx, cellSize, theme } = this;
+    const { ctx, cellSize } = this;
     const size = board.size;
     const canvasW = size * cellSize + this.paddingLeft + this.paddingRight;
     const canvasH = size * cellSize + this.paddingTop + this.paddingBottom;
-    
+
     this._updateCanvasSizeRect(canvasW, canvasH);
     ctx.clearRect(0, 0, canvasW, canvasH);
-    
+
     // 绘制基础背景
-    ctx.fillStyle = theme.bgColor || '#f5f0e8';
+    ctx.fillStyle = '#fafaf9';
     ctx.fillRect(0, 0, canvasW, canvasH);
-    
+
     ctx.save();
     ctx.translate(this.paddingLeft, this.paddingTop);
-    
+
     // 绘制网格线
-    ctx.strokeStyle = theme.gridLine || '#ccc';
+    ctx.strokeStyle = '#d4d4d4';
     ctx.lineWidth = 1;
     for (let i = 0; i <= size; i++) {
       ctx.beginPath();
@@ -4034,10 +4106,10 @@ class Renderer {
       ctx.lineTo(size * cellSize, i * cellSize);
       ctx.stroke();
     }
-    
+
     // 绘制宫线（粗线）
     const boxSize = this.getBoxSize(size);
-    ctx.strokeStyle = theme.boxLine || theme.outerBorder || '#333';
+    ctx.strokeStyle = '#1f2937';
     ctx.lineWidth = 2;
     for (let i = 0; i <= size; i += boxSize.boxW) {
       ctx.beginPath();
@@ -4051,26 +4123,36 @@ class Renderer {
       ctx.lineTo(size * cellSize, i * cellSize);
       ctx.stroke();
     }
-    
+
     // 绘制预填数字和玩家数字
-    const fixedFontSize = Math.floor(cellSize * 0.55);
-    ctx.font = `600 ${fixedFontSize}px sans-serif`;
+    const fontSize = Math.floor(cellSize * 0.6);
+    ctx.font = fontSize + 'px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    
+
     for (let r = 0; r < size; r++) {
       for (let c = 0; c < size; c++) {
         const cell = board.cells[r][c];
-        if (cell.fixedNum > 0) {
-          ctx.fillStyle = theme.fixedNum || '#333';
-          ctx.fillText(cell.fixedNum, c * cellSize + cellSize / 2, r * cellSize + cellSize / 2);
-        } else if (cell.fillNum > 0) {
-          ctx.fillStyle = theme.playerNum || '#2563eb';
-          ctx.fillText(cell.fillNum, c * cellSize + cellSize / 2, r * cellSize + cellSize / 2);
+        const val = cell.fixedNum || cell.fillNum || cell.value || 0;
+        if (val > 0) {
+          ctx.fillStyle = cell.fixedNum ? '#1f2937' : '#3b82f6';
+          ctx.fillText(val.toString(), c * cellSize + cellSize / 2, r * cellSize + cellSize / 2);
         }
       }
     }
-    
+
+    // 绘制选中框（支持单选和多选）
+    const selectedCells = board.selectedCells || (board.selectedCell ? [board.selectedCell] : []);
+    if (selectedCells.length > 0) {
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 3;
+      for (const sc of selectedCells) {
+        const sr = sc.r !== undefined ? sc.r : sc[0];
+        const sc2 = sc.c !== undefined ? sc.c : sc[1];
+        ctx.strokeRect(sc2 * cellSize + 2, sr * cellSize + 2, cellSize - 4, cellSize - 4);
+      }
+    }
+
     ctx.restore();
   }
 

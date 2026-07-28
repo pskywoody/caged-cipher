@@ -3,6 +3,20 @@
 const CharBubble = (function() {
   'use strict';
 
+  // ===== P1 关键路径加固：安全 DOM 操作辅助函数 =====
+  const _domWarned = {};
+
+  function _getEl(id) {
+    const el = document.getElementById(id);
+    if (!el) {
+      if (!_domWarned[id]) {
+        console.warn('[DOM][CharBubble] 元素不存在:', id);
+        _domWarned[id] = true;
+      }
+    }
+    return el;
+  }
+
   // === 依赖 - 从全局获取 ===
   function _isPcLayout() { return window._isPcLayout || false; }
 
@@ -74,7 +88,7 @@ const CharBubble = (function() {
     // PC mode: place inside pc-board-container near top-right of board
     // Mobile mode: append to body (fixed position)
     if (_isPcLayout()) {
-      const boardContainer = document.getElementById('pc-board-container');
+      const boardContainer = _getEl('pc-board-container');
       if (boardContainer) {
         boardContainer.appendChild(bubble);
       } else {
