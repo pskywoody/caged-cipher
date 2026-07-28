@@ -1,13 +1,17 @@
 // ErrorReporter - 全局错误捕获与兜底 UI
 // 防止未捕获异常导致游戏白屏崩溃
 // 侦探案卷夹主题：深色半透明 + 金色边框
+// P3-1 升级：错误日志持久化到 localStorage，支持导出与调试工具集成
 
 ;(function(global) {
   'use strict';
 
-  const STORAGE_KEY = 'cagedcipher_error_logs';
-  const MAX_LOGS = 20;
+  // ===== 常量配置 =====
+  const ERROR_LOG_KEY = 'caged_cipher_error_logs';
+  const MAX_LOGS = 50;
   const MAX_RECENT_ACTIONS = 10;
+  const APP_VERSION = '1.0.0';
+  const SAVE_DEBOUNCE_MS = 200; // 持久化防抖间隔，避免频繁写入
 
   // 错误严重程度
   const SEVERITY = {
@@ -16,14 +20,25 @@
     WARNING: 'warning',  // 警告：资源加载失败等
   };
 
+  // ===== 内部状态 =====
   let _logs = [];
   let _fatalErrorShown = false;
   let _errorOverlay = null;
+  let _saveTimer = null;
 
-  // === 从 localStorage 加载历史错误日志
+  // ===== 工具函数：生成简易 UUID =====
+  function _generateId() {
+    if (global.crypto && typeof global.crypto.randomUUID === 'function') {
+      return global.crypto.randomUUID();
+    }
+    // 降级方案
+    return 'err_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
+
+  // ===== 从 localStorage 加载历史错误日志 =====
   function _loadLogs() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(ERROR_LOG_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
@@ -36,33 +51,63 @@
     }
   }
 
-  // === 保存错误日志到 localStorage
+  // ===== 保存错误日志到 localStorage（惰性/防抖写入） =====
   function _saveLogs() {
+    // 防抖：避免短时间内多次错误导致重复写入
+    if (_saveTimer) {
+      clearTimeout(_saveTimer);
+    }
+    _saveTimer = setTimeout(function() {
+      _saveTimer = null;
+      _doSaveLogs();
+    }, SAVE_DEBOUNCE_MS);
+  }
+
+  // ===== 实际执行保存 =====
+  function _doSaveLogs() {
     try {
+      // 确保不超过上限
       if (_logs.length > MAX_LOGS) {
-        _logs = _logs.slice(-MAX_LOGS);
+        _logs = _logs.slice(0, MAX_LOGS);
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(_logs));
+      localStorage.setItem(ERROR_LOG_KEY, JSON.stringify(_logs));
     } catch (e) {
-      // 存储失败静默处理
-      console.warn('[ErrorReporter] Failed to save error logs:', e);
+      // 存储失败静默降级（localStorage 可能满或不可用）
+      console.warn('[ErrorReporter] Failed to save error logs to localStorage:', e.message);
     }
   }
 
-  // === 获取当前上下文信息
+  // ===== 获取当前上下文信息 =====
   function _getContext() {
     const ctx = {
-      url: location.href,
+      pageUrl: location.pathname || location.href,
       timestamp: Date.now(),
       userAgent: navigator.userAgent,
+      appVersion: APP_VERSION,
     };
 
-    // 当前关卡ID（尝试从全局变量获取
+    // 当前关卡ID（尝试从全局变量获取）
     try {
       if (global.GuideBattle && global.GuideBattle.currentLevelId) {
         ctx.levelId = global.GuideBattle.currentLevelId;
       } else if (global.currentLevelId) {
         ctx.levelId = global.currentLevelId;
+      }
+    } catch (e) { /* ignore */ }
+
+    // 当前章节ID
+    try {
+      if (global.currentChapterData && global.currentChapterData.chapterId != null) {
+        ctx.chapterId = global.currentChapterData.chapterId;
+      } else if (global.GuideBattle && global.GuideBattle.currentChapterData
+                 && global.GuideBattle.currentChapterData.chapterId != null) {
+        ctx.chapterId = global.GuideBattle.currentChapterData.chapterId;
+      } else if (ctx.levelId) {
+        // 从 levelId 推算 chapterId（如 101 -> 1）
+        const numId = parseInt(ctx.levelId);
+        if (!isNaN(numId)) {
+          ctx.chapterId = Math.floor(numId / 100);
+        }
       }
     } catch (e) { /* ignore */ }
 
@@ -87,25 +132,38 @@
     return ctx;
   }
 
-  // === 记录错误
+  // ===== 记录错误 =====
   function _recordError(severity, type, errorInfo) {
     try {
+      const context = _getContext();
       const entry = {
-        severity: severity,
+        id: _generateId(),
+        timestamp: context.timestamp,
         type: type,
+        severity: severity,
         message: errorInfo.message || '',
-        stack: errorInfo.stack || '',
-        filename: errorInfo.filename || '',
+        source: errorInfo.filename || '',
         lineno: errorInfo.lineno || 0,
         colno: errorInfo.colno || 0,
-        context: _getContext(),
-        timestamp: Date.now(),
+        stack: errorInfo.stack || '',
+        levelId: context.levelId || null,
+        chapterId: context.chapterId || null,
+        pageUrl: context.pageUrl,
+        userAgent: context.userAgent,
+        appVersion: context.appVersion,
+        act: context.act || null,
+        recentActions: context.recentActions || [],
       };
 
-      _logs.push(entry);
+      // 按时间倒序插入（最新的在前）
+      _logs.unshift(entry);
+
+      // FIFO：超出上限后移除最旧的
       if (_logs.length > MAX_LOGS) {
-        _logs = _logs.slice(-MAX_LOGS);
+        _logs = _logs.slice(0, MAX_LOGS);
       }
+
+      // 惰性持久化
       _saveLogs();
 
       // 控制台输出
@@ -119,7 +177,7 @@
     }
   }
 
-  // === 判断是否为致命错误
+  // ===== 判断是否为致命错误 =====
   function _isFatalError(message, stack) {
     const fatalPatterns = [
       'Rendering context lost',
@@ -131,7 +189,7 @@
     return fatalPatterns.some(p => combined.indexOf(p.toLowerCase()) !== -1);
   }
 
-  // === 创建错误兜底 UI
+  // ===== 创建错误兜底 UI =====
   function _showErrorOverlay(severity, message) {
     try {
       // 避免重复显示
@@ -258,7 +316,7 @@
           errorDetail.style.overflowY = 'auto';
           errorDetail.textContent = (message || '未知错误') +
             '\n\n--- 详情 ---\n' +
-            (_logs.length > 0 ? JSON.stringify(_logs[_logs.length - 1], null, 2) : '');
+            (_logs.length > 0 ? JSON.stringify(_logs[0], null, 2) : '');
         } else {
           errorDetail.style.maxHeight = '60px';
           errorDetail.style.overflow = 'hidden';
@@ -363,7 +421,7 @@
     }
   }
 
-  // === 隐藏错误兜底 UI
+  // ===== 隐藏错误兜底 UI =====
   function _hideErrorOverlay() {
     try {
       _fatalErrorShown = false;
@@ -381,7 +439,7 @@
     }
   }
 
-  // === 安装全局错误监听
+  // ===== 安装全局错误监听 =====
   function _installGlobalHandlers() {
     // 1. JS 运行时错误
     const originalOnError = global.onerror;
@@ -440,7 +498,7 @@
           ? SEVERITY.FATAL
           : SEVERITY.ERROR;
 
-        _recordError(severity, 'unhandled_promise', {
+        _recordError(severity, 'unhandled_rejection', {
           message: message,
           stack: stack,
           filename: '',
@@ -486,7 +544,7 @@
 
         // 只记录已知资源错误
         if (resourceType !== 'unknown') {
-          _recordError(SEVERITY.WARNING, 'resource_load', {
+          _recordError(SEVERITY.WARNING, 'resource_error', {
             message: '资源加载失败: ' + resourceType,
             stack: resourceUrl,
             filename: resourceUrl,
@@ -500,7 +558,7 @@
     }, true); // 使用捕获阶段，确保能捕获到资源加载错误
   }
 
-  // === 公共 API
+  // ===== 公共 API =====
   const ErrorReporter = {
     /**
      * 手动报告一个错误
@@ -532,21 +590,48 @@
     },
 
     /**
-     * 获取所有错误日志
-     * @returns {Array}
+     * 获取所有错误日志（按时间倒序，最新的在前）
+     * @returns {Array} 错误日志数组
      */
     getLogs: function() {
       return [..._logs];
     },
 
     /**
-     * 清空错误日志
+     * 清空所有错误日志（内存 + localStorage）
      */
     clearLogs: function() {
       try {
         _logs = [];
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(ERROR_LOG_KEY);
+        // 同时清理旧 key（向后兼容）
+        try { localStorage.removeItem('cagedcipher_error_logs'); } catch (e) { /* ignore */ }
       } catch (e) { /* ignore */ }
+    },
+
+    /**
+     * 导出错误日志为 JSON 字符串（用于反馈/上报）
+     * @returns {string} JSON 格式的错误日志
+     */
+    exportLogs: function() {
+      try {
+        return JSON.stringify({
+          appVersion: APP_VERSION,
+          exportedAt: new Date().toISOString(),
+          totalCount: _logs.length,
+          logs: _logs,
+        }, null, 2);
+      } catch (e) {
+        return '{}';
+      }
+    },
+
+    /**
+     * 获取错误总数
+     * @returns {number} 错误日志条数
+     */
+    getErrorCount: function() {
+      return _logs.length;
     },
 
     /**
@@ -568,13 +653,23 @@
      * 错误严重级别常量
      */
     SEVERITY: SEVERITY,
+
+    /**
+     * 存储 key（便于外部引用）
+     */
+    STORAGE_KEY: ERROR_LOG_KEY,
+
+    /**
+     * 最大日志条数
+     */
+    MAX_LOGS: MAX_LOGS,
   };
 
   // 初始化
   try {
     _loadLogs();
     _installGlobalHandlers();
-    console.log('[ErrorReporter] Initialized');
+    console.log('[ErrorReporter] Initialized (' + _logs.length + ' persisted logs found)');
   } catch (e) {
     console.error('[ErrorReporter] Init failed:', e);
   }

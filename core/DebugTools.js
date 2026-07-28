@@ -133,6 +133,49 @@
         if (renderer) renderer.render(board);
         console.log('[Debug] AI numbers hidden');
       },
+
+      // 9. 打印最近错误日志
+      dumpErrors: function(count) {
+        const ErrorReporter = global.ErrorReporter;
+        if (!ErrorReporter) {
+          console.log('[Debug] ErrorReporter not available');
+          return;
+        }
+        const n = Math.min(count || 10, ErrorReporter.getErrorCount());
+        const logs = ErrorReporter.getLogs();
+        const recent = logs.slice(0, n);
+        console.log('=== [Debug] Recent Errors (' + n + '/' + ErrorReporter.getErrorCount() + ') ===');
+        if (recent.length === 0) {
+          console.log('  (no errors recorded)');
+          return;
+        }
+        recent.forEach(function(log, i) {
+          const time = new Date(log.timestamp).toLocaleString();
+          const levelInfo = log.levelId ? '[L' + log.levelId + '] ' : '';
+          console.log(
+            '  [' + i + '] [' + log.severity + '] [' + log.type + '] ' +
+            levelInfo + log.message +
+            '\n      time: ' + time +
+            (log.source ? '\n      source: ' + log.source + ':' + log.lineno + ':' + log.colno : '') +
+            (log.pageUrl ? '\n      page: ' + log.pageUrl : '')
+          );
+          if (log.stack) {
+            console.log('      stack:\n' + log.stack.split('\n').map(function(l) { return '        ' + l; }).join('\n'));
+          }
+        });
+      },
+
+      // 10. 清除所有错误日志
+      clearErrors: function() {
+        const ErrorReporter = global.ErrorReporter;
+        if (!ErrorReporter) {
+          console.log('[Debug] ErrorReporter not available');
+          return;
+        }
+        const count = ErrorReporter.getErrorCount();
+        ErrorReporter.clearLogs();
+        console.log('[Debug] Cleared ' + count + ' error log(s)');
+      },
     };
 
     return DEBUG_TOOLS;

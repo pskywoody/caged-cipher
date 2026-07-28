@@ -2,6 +2,18 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: blob:;
+    font-src 'self' data:;
+    audio-src 'self' blob:;
+    connect-src 'self';
+    frame-src 'none';
+    object-src 'none';
+    base-uri 'self';
+  ">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Caged Cipher · 笼中密码</title>
   <link rel="stylesheet" href="assets/css/style.css">
