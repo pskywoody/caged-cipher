@@ -364,7 +364,16 @@
     _getProgressData() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) return JSON.parse(raw);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          // 兼容新版包装格式 { version, data, checksum }
+          if (parsed && typeof parsed === 'object' &&
+              'version' in parsed && 'data' in parsed && 'checksum' in parsed &&
+              typeof parsed.data === 'object') {
+            return parsed.data;
+          }
+          return parsed;
+        }
       } catch (e) {}
       return { achievements: [], levelScores: {} };
     }

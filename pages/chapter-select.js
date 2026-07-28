@@ -5,6 +5,10 @@
   'use strict';
 
   const STORAGE_KEY = 'cagedcipher_progress';
+  const BACKUP_KEY_PREFIX = 'cagedcipher_progress_backup_';
+  const BACKUP_COUNT = 3;
+  const CHECKSUM_SALT = 'caged_cipher_v2_secret';
+  const SAVE_DATA_VERSION = 1; // 包装层版本号（外层 { version, data, checksum }）
 
   // === chapters.json 缓存 ===
   let _cachedChapterData = null;
@@ -334,13 +338,32 @@
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
-          this._data = JSON.parse(raw);
-          // 迁移旧数据
-          this._migrate();
+          const result = this._tryParseAndValidate(raw);
+          if (result.ok) {
+            this._data = result.data;
+            this._migrate();
+            return this._data;
+          }
+          // 主存档损坏，尝试从备份恢复
+          console.warn('[ProgressManager] Main save corrupted, trying backups...');
+          const backupResult = this._loadFromBackup();
+          if (backupResult.ok) {
+            this._data = backupResult.data;
+            this._migrate();
+            this._showToast('存档已从备份恢复', 'info');
+            // 恢复后立即保存一次，重建主存档
+            this.save();
+            return this._data;
+          }
+          // 全部失败，使用默认数据
+          console.warn('[ProgressManager] All backups failed, using default data');
+          this._data = this._defaultData();
+          this._showToast('存档损坏，已重置为初始状态', 'warning');
         } else {
           this._data = this._defaultData();
         }
       } catch (e) {
+        console.warn('[ProgressManager] load() error:', e);
         this._data = this._defaultData();
       }
       return this._data;
@@ -348,7 +371,13 @@
 
     save() {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(this._data));
+        // 保存前先轮转备份
+        this._rotateBackups();
+
+        // 包装数据：{ version, data, checksum }
+        const wrapped = this._wrapData(this._data);
+        const jsonStr = JSON.stringify(wrapped);
+        localStorage.setItem(STORAGE_KEY, jsonStr);
       } catch (e) {
         // 专门处理容量超限错误
         if (e.name === 'QuotaExceededError' || e.code === 22) {
@@ -357,7 +386,8 @@
           this._cleanupNonCriticalData();
           // 清理后重试保存
           try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(this._data));
+            const wrapped = this._wrapData(this._data);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(wrapped));
             console.log('[ProgressManager] Save succeeded after cleanup');
             return;
           } catch (e2) {
@@ -425,6 +455,193 @@
       } catch (e) {
         // 极端情况下 DOM 操作也可能失败，静默处理
       }
+    },
+
+    /**
+     * 通用 Toast 提示
+     * @param {string} message - 提示消息
+     * @param {string} [type='info'] - 类型: info | warning | error | success
+     */
+    _showToast(message, type) {
+      try {
+        type = type || 'info';
+        const colorMap = {
+          info: { border: '#c9a96e', text: '#d4c5a9', icon: '📜' },
+          warning: { border: '#ef4444', text: '#fca5a5', icon: '⚠️' },
+          error: { border: '#dc2626', text: '#fca5a5', icon: '❌' },
+          success: { border: '#22c55e', text: '#86efac', icon: '✅' },
+        };
+        const colors = colorMap[type] || colorMap.info;
+
+        const toast = document.createElement('div');
+        toast.style.cssText =
+          'position:fixed;top:15%;left:50%;' +
+          'transform:translate(-50%,-50%);' +
+          'background:linear-gradient(180deg, #2d1f1a 0%, #1a100c 100%);' +
+          'border:1px solid ' + colors.border + ';' +
+          'border-radius:6px;padding:12px 22px;' +
+          'text-align:center;z-index:25000;opacity:0;' +
+          'transition:opacity 0.3s, transform 0.3s;' +
+          'box-shadow:0 8px 32px rgba(0,0,0,0.5);' +
+          'font-family:\'Noto Serif SC\',serif;max-width:80vw;' +
+          'font-size:13px;color:' + colors.text + ';';
+        toast.innerHTML =
+          '<span style="margin-right:6px;">' + colors.icon + '</span>' +
+          '<span>' + message + '</span>';
+        document.body.appendChild(toast);
+        requestAnimationFrame(function() {
+          toast.style.opacity = '1';
+          toast.style.transform = 'translate(-50%, 0)';
+        });
+        setTimeout(function() {
+          toast.style.opacity = '0';
+          toast.style.transform = 'translate(-50%, -10px)';
+          setTimeout(function() { if (toast.parentNode) toast.remove(); }, 300);
+        }, 2500);
+      } catch (e) {
+        // 静默处理
+      }
+    },
+
+    /**
+     * DJB2 哈希算法 - 生成简单校验和
+     * 防君子不防小人，阻止普通用户直接手动修改 JSON
+     * @param {string} str - 输入字符串
+     * @returns {string} 十六进制哈希值
+     */
+    _computeChecksum(str) {
+      try {
+        let hash = 5381;
+        for (let i = 0; i < str.length; i++) {
+          hash = ((hash << 5) + hash) + str.charCodeAt(i);
+          hash = hash & hash; // 转成 32 位整数
+        }
+        // 转成无符号十六进制字符串
+        return (hash >>> 0).toString(16);
+      } catch (e) {
+        console.warn('[ProgressManager] Checksum compute error:', e);
+        return '';
+      }
+    },
+
+    /**
+     * 包装数据，添加版本号和校验和
+     * @param {Object} data - 原始进度数据
+     * @returns {Object} { version, data, checksum }
+     */
+    _wrapData(data) {
+      try {
+        const dataStr = JSON.stringify(data);
+        const checksum = this._computeChecksum(SAVE_DATA_VERSION + dataStr + CHECKSUM_SALT);
+        return {
+          version: SAVE_DATA_VERSION,
+          data: data,
+          checksum: checksum,
+        };
+      } catch (e) {
+        console.warn('[ProgressManager] Wrap data error:', e);
+        // 降级：直接返回原始数据（向后兼容）
+        return data;
+      }
+    },
+
+    /**
+     * 尝试解析并验证存档数据
+     * 支持两种格式：
+     *   1. 新版：{ version, data, checksum }
+     *   2. 旧版：直接是数据对象（无 checksum，兼容加载）
+     * @param {string} raw - localStorage 原始字符串
+     * @returns {Object} { ok: boolean, data: Object }
+     */
+    _tryParseAndValidate(raw) {
+      try {
+        const parsed = JSON.parse(raw);
+
+        // 判断是否为新版包装格式（有 version 和 data 和 checksum 字段）
+        if (parsed && typeof parsed === 'object' &&
+            'version' in parsed && 'data' in parsed && 'checksum' in parsed &&
+            typeof parsed.data === 'object') {
+          // 新版格式：验证 checksum
+          const dataStr = JSON.stringify(parsed.data);
+          const expectedChecksum = this._computeChecksum(
+            String(parsed.version) + dataStr + CHECKSUM_SALT
+          );
+          if (parsed.checksum === expectedChecksum) {
+            // 校验通过
+            return { ok: true, data: parsed.data };
+          } else {
+            // 校验失败，视为数据损坏
+            console.warn('[ProgressManager] Checksum mismatch, data may be tampered');
+            return { ok: false, data: null };
+          }
+        } else {
+          // 旧版格式（直接是数据对象），向后兼容
+          // 旧版没有 checksum，直接加载，保存时会自动加上
+          console.log('[ProgressManager] Legacy save format detected, will add checksum on next save');
+          return { ok: true, data: parsed };
+        }
+      } catch (e) {
+        console.warn('[ProgressManager] Parse failed:', e);
+        return { ok: false, data: null };
+      }
+    },
+
+    /**
+     * 轮转备份：backup_2 → backup_3, backup_1 → backup_2, 主存档 → backup_1
+     * 在主存档写入前调用
+     */
+    _rotateBackups() {
+      try {
+        // 从旧到新依次后移
+        for (let i = BACKUP_COUNT; i >= 1; i--) {
+          const sourceKey = i === 1 ? STORAGE_KEY : (BACKUP_KEY_PREFIX + (i - 1));
+          const targetKey = BACKUP_KEY_PREFIX + i;
+
+          if (i === BACKUP_COUNT) {
+            // 最旧的备份直接丢弃
+            try {
+              localStorage.removeItem(targetKey);
+            } catch (e) { /* ignore */ }
+          }
+
+          try {
+            const sourceVal = localStorage.getItem(sourceKey);
+            if (sourceVal) {
+              localStorage.setItem(targetKey, sourceVal);
+            }
+          } catch (e) {
+            // 单个备份失败不影响整体
+            console.warn('[ProgressManager] Backup rotate failed at index', i, e);
+          }
+        }
+      } catch (e) {
+        console.warn('[ProgressManager] Backup rotate error:', e);
+      }
+    },
+
+    /**
+     * 从备份中加载数据
+     * 按 backup_1 → backup_2 → backup_3 顺序尝试
+     * @returns {Object} { ok: boolean, data: Object }
+     */
+    _loadFromBackup() {
+      try {
+        for (let i = 1; i <= BACKUP_COUNT; i++) {
+          const key = BACKUP_KEY_PREFIX + i;
+          const raw = localStorage.getItem(key);
+          if (!raw) continue;
+
+          const result = this._tryParseAndValidate(raw);
+          if (result.ok) {
+            console.log('[ProgressManager] Restored from backup_' + i);
+            return { ok: true, data: result.data, backupIndex: i };
+          }
+          console.warn('[ProgressManager] Backup_' + i + ' also corrupted');
+        }
+      } catch (e) {
+        console.warn('[ProgressManager] Load from backup error:', e);
+      }
+      return { ok: false, data: null };
     },
 
     _defaultData() {
@@ -559,6 +776,16 @@
     },
 
     reset() {
+      try {
+        // 清除所有备份
+        for (let i = 1; i <= BACKUP_COUNT; i++) {
+          try {
+            localStorage.removeItem(BACKUP_KEY_PREFIX + i);
+          } catch (e) { /* ignore */ }
+        }
+      } catch (e) {
+        console.warn('[ProgressManager] Clear backups on reset failed:', e);
+      }
       this._data = this._defaultData();
       this.save();
     },

@@ -284,6 +284,7 @@
   let expertSystem = null;
   let comboSystem = null;
   let comedySystem = null;  // 吐槽系统
+  let _autoHintMuteUntil = 0; // 自动提示临时静音截止时间
   let storyEngine = null;
   let currentLevelData = null;
   let currentChapterData = null;
@@ -333,6 +334,92 @@
   // UI elements to hide during story
   const UI_SELECTORS = ['#game-container', '#num-pad', '#toolbar'];
 
+  // ============================================================
+  // 统一震动反馈 (Unified Vibration / Haptic Feedback)
+  // 所有震动都经过此函数，遵循 board.settings.vibration 开关
+  // 震动强度分级：
+  //   - 微反馈（微震动）: 5-10ms —— 选格、普通按钮
+  //   - 正常反馈: 10-15ms —— 填数、擦除、笔记切换
+  //   - 强反馈: 30-50ms 或三段式 —— 错误、连击里程碑
+  //   - 超强反馈: 80ms+ 或长脉冲 —— EUREKA、通关、高潮
+  // ============================================================
+  const VIBRATE_PRESETS = {
+    // 微反馈
+    MICRO: 5,           // 普通按钮点击
+    TAP: 10,            // 格子选中
+
+    // 正常反馈
+    FILL: 15,           // 正确填数
+    ERASE: 10,          // 擦除
+    NOTE_TOGGLE: [10, 20, 10],  // 笔记模式切换
+    LONG_PRESS: 15,     // 长按激活
+
+    // 强反馈
+    ERROR: [50, 30, 50],       // 错误填数
+    ERROR_SOFT: [10, 20, 10],  // 轻度错误（清除所有笔记等）
+    COMBO_5: 20,               // 5连击
+    COMBO_10: 30,              // 10连击
+    COMBO_MAX: 50,             // MAX连击
+    COMBO_MILESTONE: [20, 30, 50], // 连击里程碑（递增）
+
+    // 超强反馈
+    EUREKA: 80,                // EUREKA时刻
+    CLIMAX: [50, 20, 30],      // 高潮/印章
+    VICTORY: [80, 40, 80],     // 通关胜利
+  };
+
+  /**
+   * 统一震动函数
+   * @param {number|number[]} pattern - 震动模式（毫秒数或数组）
+   * @param {string} [presetName] - 预设名称（用于日志，可选）
+   */
+  function vibrate(pattern, presetName) {
+    if (!board || !board.settings || board.settings.vibration === false) return;
+    if (typeof navigator.vibrate !== 'function') return;
+    try {
+      navigator.vibrate(pattern);
+    } catch(e) {
+      // 静默失败
+    }
+  }
+
+  // ============================================================
+  // 页面导航（带翻页过渡动画 + 音效）
+  // ============================================================
+  let _isNavigating = false;
+
+  /**
+   * 带过渡动画的页面跳转
+   * @param {string} url - 目标 URL
+   * @param {Object} [options] - 选项
+   * @param {number} [options.delay=400] - 动画时长（毫秒）
+   * @param {boolean} [options.playSound=true] - 是否播放翻页音效
+   */
+  function navigateTo(url, options) {
+    if (_isNavigating) return; // 防止重复跳转
+    _isNavigating = true;
+
+    options = options || {};
+    const delay = options.delay !== undefined ? options.delay : 400;
+    const playSound = options.playSound !== false;
+
+    // 1. 播放翻页音效
+    if (playSound && typeof AudioService !== 'undefined' && AudioService.sfx) {
+      try {
+        AudioService.sfx.play('book_flip');
+      } catch(e) {}
+    }
+
+    // 2. 播放离开动画（淡出 + 缩放，模拟合书）
+    const root = document.querySelector('.page-transition-root') || document.body;
+    root.classList.add('page-leave');
+
+    // 3. 动画结束后跳转
+    setTimeout(() => {
+      window.location.href = url;
+    }, delay);
+  }
+
   // Character bubble state
   let _characterBubbleEl = null;
   let _characterBubbleTimer = null;
@@ -372,6 +459,24 @@
     // Init audio
     AudioService.init();
 
+    // 页面进入动画（翻书效果）
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const root = document.querySelector('.page-transition-root');
+        if (root) {
+          root.classList.add('page-enter-active');
+          // 播放翻页开书音效（尾音）
+          try {
+            if (AudioService.sfx) AudioService.sfx.play('book_open', { volume: 0.5 });
+          } catch(e) {}
+          // 动画结束后清理类名
+          setTimeout(() => {
+            root.classList.remove('page-enter', 'page-enter-active');
+          }, 550);
+        }
+      });
+    });
+
     // Init settings panel
     if (typeof SettingsPanel !== 'undefined') {
       settingsPanel = new SettingsPanel({
@@ -381,6 +486,10 @@
       });
       settingsPanel.load();
     }
+
+    // ===== GameContext 中央状态（五层联动核心）=====
+    // 统一的游戏状态容器，感知/决策/行动/学习/三幕式各层在此交汇
+    _initGameContext();
 
     // Init expert system
     expertSystem = new ExpertSystem();
@@ -1150,6 +1259,17 @@
     // Init board
     initBoard();
 
+    // ===== GameContext: 重置为新关卡状态 =====
+    if (global.GameContext) {
+      const chapterId = currentChapterData ? currentChapterData.chapterId : null;
+      const isBoss = isLastLevelOfChapter();
+      global.GameContext.resetForNewLevel({
+        levelId: levelId,
+        chapterId: chapterId,
+        isBossBattle: isBoss,
+      });
+    }
+
     // 三幕式引导·钩子2：第一幕揭盘（棋盘渲染后，高亮 + 对话）
     if (typeof ThreeActGuide !== 'undefined') {
       try { await ThreeActGuide.playAct1BoardReveal(); } catch(e) {}
@@ -1879,6 +1999,14 @@
       opponent: bossConfig,
       onEnd: onBossBattleEnd,
     });
+
+    // === GameContext 同步：Boss战启动，更新关卡信息 ===
+    try {
+      if (global.GameContext && global.GameContext.level) {
+        global.GameContext.level.isBossBattle = true;
+        global.GameContext.level.levelId = currentLevelId;
+      }
+    } catch (e) {}
 
     // 启动HUD更新
     _startBossHudUpdate();
@@ -2619,6 +2747,16 @@
           if (milestone.sfx && typeof AudioService !== 'undefined') {
             AudioService.sfx.play(milestone.sfx);
           }
+          // 里程碑震动（递增强度）
+          if (milestone.key === 'combo_5') {
+            vibrate(VIBRATE_PRESETS.COMBO_5);
+          } else if (milestone.key === 'combo_10') {
+            vibrate(VIBRATE_PRESETS.COMBO_10);
+          } else if (milestone.key === 'combo_max') {
+            vibrate(VIBRATE_PRESETS.COMBO_MAX);
+          } else {
+            vibrate(VIBRATE_PRESETS.COMBO_MILESTONE);
+          }
           // 5连击时显示角色鼓励气泡
           if (milestone.key === 'combo_5' && expertSystem && expertSystem.expression) {
             expertSystem.expression.enqueue({
@@ -2637,6 +2775,8 @@
           if (typeof AudioService !== 'undefined') {
             AudioService.sfx.play('eureka');
           }
+          // EUREKA 震动
+          vibrate(VIBRATE_PRESETS.EUREKA);
           const msg = type === 'insight'
             ? '灵感迸发！想通了关键的一步！'
             : 'EUREKA！连击爆发！';
@@ -2980,6 +3120,8 @@
         if (bossBattleStarted) return true;
         // 6. 暂停或已通关
         if (isPaused || isCompleted) return true;
+        // 7. 自动提示临时静音（提示期间喜剧静音
+        if (Date.now() < _autoHintMuteUntil) return true;
         return false;
       });
       comedySystem.reset(currentLevelId);
@@ -3153,6 +3295,7 @@
     if (btnNote) {
       btnNote.addEventListener('click', () => {
         AudioService.sfx.play('click');
+        vibrate(VIBRATE_PRESETS.MICRO);
         toggleNoteMode();
       });
     }
@@ -3231,7 +3374,7 @@
     });
 
     // Toolbar buttons
-    document.getElementById('btn-undo')?.addEventListener('click', () => { AudioService.sfx.play('click'); undo(); });
+    document.getElementById('btn-undo')?.addEventListener('click', () => { AudioService.sfx.play('click'); vibrate(VIBRATE_PRESETS.MICRO); undo(); });
     // 擦除按钮：单击=擦除当前格，长按=笔记模式下清空所有笔记
     (function setupEraseButton() {
       const btn = document.getElementById('btn-erase');
@@ -3254,7 +3397,7 @@
               board.clearAllCandidates();
               renderer.render(board);
               AudioService.sfx.play('erase');
-              if (navigator.vibrate) navigator.vibrate([10, 20, 10]);
+              vibrate(VIBRATE_PRESETS.ERROR_SOFT);
               showToast('已清除所有笔记', 1000);
             }
           } else {
@@ -3283,7 +3426,7 @@
         btn.classList.remove('long-pressing');
       });
     })();
-    document.getElementById('btn-hint')?.addEventListener('click', () => { AudioService.sfx.play('click'); showHint(); });
+    document.getElementById('btn-hint')?.addEventListener('click', () => { AudioService.sfx.play('click'); vibrate(VIBRATE_PRESETS.MICRO); showHint(); });
     document.getElementById('btn-whatif')?.addEventListener('click', () => {
       AudioService.sfx.play('click');
       toggleWhatIfMode();
@@ -3587,6 +3730,7 @@
     }
     board.selectCell(cell.r, cell.c);
     AudioService.sfx.play('select');
+    vibrate(VIBRATE_PRESETS.TAP);
     // 吐槽系统：选格也算操作（重置闲置计时）
     if (comedySystem) {
       comedySystem.onPlayerAction();
@@ -3983,7 +4127,7 @@
       }
 
       // 触感反馈：长按激活时震动
-      if (navigator.vibrate) navigator.vibrate(15);
+      vibrate(VIBRATE_PRESETS.LONG_PRESS);
       enterQuickFillMode(num);
     }, 500);
   }
@@ -4200,8 +4344,8 @@
     renderer.forceRender = true;
     renderer.render(board);
 
-    // 震动反馈（如果支持）
-    if (navigator.vibrate) navigator.vibrate([8, 15, 8]);
+    // 震动反馈
+    vibrate(VIBRATE_PRESETS.NOTE_TOGGLE);
 
     // 播放笔记切换音效
     AudioService.sfx.play('note_toggle');
@@ -4241,7 +4385,7 @@
     }
 
     AudioService.sfx.play('click');
-    if (navigator.vibrate) navigator.vibrate(30);
+    vibrate(VIBRATE_PRESETS.LONG_PRESS);
   }
 
   function exitQuickFillMode() {
@@ -4861,7 +5005,7 @@
     }
 
     // 触感反馈
-    if (navigator.vibrate) navigator.vibrate(10);
+    vibrate(VIBRATE_PRESETS.ERASE);
 
     // 连击系统：擦除断连
     if (comboSystem) {
@@ -4934,7 +5078,7 @@
     // 立即更新按钮状态 + 键盘区域视觉提示
     updateNoteButtonState();
     // 触感反馈
-    if (navigator.vibrate) navigator.vibrate(noteMode ? [10, 20, 10] : 8);
+    vibrate(noteMode ? VIBRATE_PRESETS.NOTE_TOGGLE : VIBRATE_PRESETS.MICRO);
 
     // 切换笔记模式时清除多选
     if (board && board.selectedCells.length > 0) {
@@ -4972,6 +5116,507 @@
 
     // 轻量 Toast 提示（缩短显示时间，避免干扰）
     showToast(noteMode ? '笔记模式' : '填数模式', 800);
+  }
+
+  // ============================================================
+  //  GameContext 中央状态系统（五层联动核心基础设施）
+  // ============================================================
+  //  统一的游戏状态容器，打通"感知→决策→行动"完整数据流
+  //  所有层级通过 window.GameContext 读写共享状态
+  // ============================================================
+
+  function _initGameContext() {
+    const GameContext = {
+      // === 玩家状态（感知层写入）===
+      player: {
+        combo: 0,
+        flow: 'cold',           // cold | stale | flow | eureka
+        stuck: false,
+        anxious: false,
+        consecutiveWrong: 0,
+        totalCorrect: 0,
+        totalWrong: 0,
+        lastActionTime: 0,
+        hintUsageCount: 0,
+      },
+      // === 关卡状态（三幕式/游戏循环写入）===
+      level: {
+        act: 1,                 // 1 | 2 | 3
+        simpleFilled: 0,
+        simpleTotal: 0,
+        gateFilled: 0,
+        gateTotal: 0,
+        coreFilled: 0,
+        coreTotal: 0,
+        elapsedTime: 0,
+        levelId: null,
+        chapterId: null,
+        isBossBattle: false,
+      },
+      // === 决策状态（决策层读写）===
+      decision: {
+        lastAction: null,
+        lastActionTime: 0,
+        cooldowns: {},          // { actionKey: expiryTime }
+      },
+      // === 学习状态（学习层读写）===
+      learning: {
+        style: 'balanced',      // precise | experimental | cautious | balanced
+        mastery: {},            // { techniqueId: masteryLevel }
+        accuracyRate: 0,
+        hintUsageRate: 0,
+      },
+
+      // === 便捷方法 ===
+
+      /**
+       * 检查某个动作是否在冷却中
+       * @param {string} key - 冷却键名
+       * @returns {boolean}
+       */
+      isInCooldown(key) {
+        try {
+          return Date.now() < (this.decision.cooldowns[key] || 0);
+        } catch (e) {
+          console.warn('[GameContext] isInCooldown error:', e);
+          return false;
+        }
+      },
+
+      /**
+       * 设置某个动作的冷却时间
+       * @param {string} key - 冷却键名
+       * @param {number} ms - 冷却毫秒数
+       */
+      setCooldown(key, ms) {
+        try {
+          this.decision.cooldowns[key] = Date.now() + ms;
+        } catch (e) {
+          console.warn('[GameContext] setCooldown error:', e);
+        }
+      },
+
+      /**
+       * 批量更新玩家状态
+       * @param {Object} patch - 要更新的玩家状态字段
+       */
+      updatePlayer(patch) {
+        try {
+          Object.assign(this.player, patch);
+          this.player.lastActionTime = Date.now();
+        } catch (e) {
+          console.warn('[GameContext] updatePlayer error:', e);
+        }
+      },
+
+      /**
+       * 批量更新关卡状态
+       * @param {Object} patch - 要更新的关卡状态字段
+       */
+      updateLevel(patch) {
+        try {
+          Object.assign(this.level, patch);
+        } catch (e) {
+          console.warn('[GameContext] updateLevel error:', e);
+        }
+      },
+
+      /**
+       * 批量更新学习状态
+       * @param {Object} patch - 要更新的学习状态字段
+       */
+      updateLearning(patch) {
+        try {
+          Object.assign(this.learning, patch);
+        } catch (e) {
+          console.warn('[GameContext] updateLearning error:', e);
+        }
+      },
+
+      /**
+       * 重置为新关卡初始状态
+       */
+      resetForNewLevel(levelInfo = {}) {
+        try {
+          this.player = {
+            combo: 0,
+            flow: 'cold',
+            stuck: false,
+            anxious: false,
+            consecutiveWrong: 0,
+            totalCorrect: 0,
+            totalWrong: 0,
+            lastActionTime: Date.now(),
+            hintUsageCount: 0,
+          };
+          this.level = Object.assign({
+            act: 1,
+            simpleFilled: 0,
+            simpleTotal: 0,
+            gateFilled: 0,
+            gateTotal: 0,
+            coreFilled: 0,
+            coreTotal: 0,
+            elapsedTime: 0,
+            levelId: null,
+            chapterId: null,
+            isBossBattle: false,
+          }, levelInfo);
+          this.decision = {
+            lastAction: null,
+            lastActionTime: 0,
+            cooldowns: {},
+          };
+          log.info('[GameContext] 已重置为新关卡状态, levelId:', levelInfo.levelId || 'unknown');
+        } catch (e) {
+          console.warn('[GameContext] resetForNewLevel error:', e);
+        }
+      },
+
+      /**
+       * 获取完整状态快照（用于调试/日志）
+       * @returns {Object}
+       */
+      snapshot() {
+        try {
+          return {
+            player: { ...this.player },
+            level: { ...this.level },
+            decision: {
+              lastAction: this.decision.lastAction,
+              lastActionTime: this.decision.lastActionTime,
+              cooldownCount: Object.keys(this.decision.cooldowns).length,
+            },
+            learning: {
+              style: this.learning.style,
+              accuracyRate: this.learning.accuracyRate,
+              hintUsageRate: this.learning.hintUsageRate,
+              masteryCount: Object.keys(this.learning.mastery).length,
+            },
+          };
+        } catch (e) {
+          console.warn('[GameContext] snapshot error:', e);
+          return {};
+        }
+      },
+    };
+
+    // 挂到全局，让各层都能访问
+    global.GameContext = GameContext;
+
+    log.info('[GameContext] 中央状态系统已初始化');
+    return GameContext;
+  }
+
+  /**
+   * 全局 AI 速度调整函数（由决策层调用）
+   * 通过 GameContext → GuideBattle 的链路调整 AI 速度倍率
+   * 速度倍率按 reason 独立管理，多个 reason 叠加相乘
+   * @param {number} factor - 速度倍率（<1 变慢，>1 变快）
+   * @param {string} reason - 调整原因（用于独立追踪和重置）
+   * @param {number} durationMs - 持续时间（毫秒），到期自动恢复
+   */
+  function _setAISpeedMultiplier(factor, reason, durationMs) {
+    try {
+      if (!global.GameContext) {
+        console.warn('[AISpeed] GameContext 未初始化，跳过速度调整');
+        return;
+      }
+
+      const ctx = global.GameContext;
+
+      // 确保 _aiSpeedModifiers 存在
+      if (!ctx._aiSpeedModifiers) {
+        ctx._aiSpeedModifiers = {};
+      }
+
+      // 设置该 reason 的倍率
+      ctx._aiSpeedModifiers[reason] = {
+        factor: factor,
+        expiry: durationMs ? Date.now() + durationMs : 0,
+      };
+
+      // 计算总倍率
+      let totalFactor = 1.0;
+      for (const key in ctx._aiSpeedModifiers) {
+        const mod = ctx._aiSpeedModifiers[key];
+        // 检查是否过期
+        if (mod.expiry > 0 && Date.now() > mod.expiry) {
+          delete ctx._aiSpeedModifiers[key];
+          continue;
+        }
+        totalFactor *= mod.factor;
+      }
+
+      // 限制在合理范围
+      totalFactor = Math.max(0.3, Math.min(2.0, totalFactor));
+
+      // 如果有活跃的 Boss 战，应用到 GuideBattle
+      if (typeof guideBattle !== 'undefined' && guideBattle && guideBattle.active) {
+        if (typeof guideBattle.setContextSpeedMultiplier === 'function') {
+          guideBattle.setContextSpeedMultiplier(totalFactor, reason);
+        }
+      }
+
+      log.info('[AISpeed] 速度调整 reason=' + reason +
+        ' factor=' + factor.toFixed(2) +
+        ' total=' + totalFactor.toFixed(2) +
+        ' duration=' + (durationMs || 'infinite'));
+
+      // 如果设置了持续时间，到期后自动清除并重算
+      if (durationMs && durationMs > 0) {
+        setTimeout(() => {
+          try {
+            _resetAISpeedMultiplier(reason);
+          } catch (e) {
+            console.warn('[AISpeed] auto-reset error:', e);
+          }
+        }, durationMs);
+      }
+    } catch (e) {
+      console.warn('[AISpeed] _setAISpeedMultiplier error:', e);
+    }
+  }
+
+  /**
+   * 重置某个原因的 AI 速度倍率
+   * @param {string} reason - 要重置的调整原因
+   */
+  function _resetAISpeedMultiplier(reason) {
+    try {
+      if (!global.GameContext || !global.GameContext._aiSpeedModifiers) {
+        return;
+      }
+
+      const ctx = global.GameContext;
+      delete ctx._aiSpeedModifiers[reason];
+
+      // 重新计算总倍率
+      let totalFactor = 1.0;
+      for (const key in ctx._aiSpeedModifiers) {
+        const mod = ctx._aiSpeedModifiers[key];
+        if (mod.expiry > 0 && Date.now() > mod.expiry) {
+          delete ctx._aiSpeedModifiers[key];
+          continue;
+        }
+        totalFactor *= mod.factor;
+      }
+
+      totalFactor = Math.max(0.3, Math.min(2.0, totalFactor));
+
+      if (typeof guideBattle !== 'undefined' && guideBattle && guideBattle.active) {
+        if (typeof guideBattle.setContextSpeedMultiplier === 'function') {
+          guideBattle.setContextSpeedMultiplier(totalFactor, 'reset_' + reason);
+        }
+      }
+
+      log.info('[AISpeed] 速度重置 reason=' + reason + ' total=' + totalFactor.toFixed(2));
+    } catch (e) {
+      console.warn('[AISpeed] _resetAISpeedMultiplier error:', e);
+    }
+  }
+
+  // 挂到全局，供决策层调用
+  global._setAISpeedMultiplier = _setAISpeedMultiplier;
+  global._resetAISpeedMultiplier = _resetAISpeedMultiplier;
+
+  // === Auto Hint (决策层触发) ===
+  /**
+   * 执行自动提示（由决策层 TRIGGER_HINT 动作触发）
+   * 与手动提示的区别：
+   * 1. 带角色对话前缀"让我看看..."，更有代入感
+   * 2. 冷却时间独立计算（自动提示冷却更长）
+   * 3. 不消耗玩家提示次数（算0.5次，用于成就判定）
+   * 4. 自动提示时喜剧系统静音
+   * 5. Boss战中频率降低
+   * @param {Object} params - { hintLevel, reason, character, isNovice, technique }
+   */
+  function showAutoHint(params = {}) {
+    if (!hintSystem) return;
+
+    // What If 模式下不自动提示
+    if (WhatIfState && WhatIfState.active) return;
+
+    // 教学引导激活时不自动提示
+    if (lessonPlayer && lessonPlayer.isActive) return;
+
+    // Boss 战中自动提示频率降低（检查 Boss 战专用冷却）
+    const isBoss = typeof isLastLevelOfChapter === 'function' ? isLastLevelOfChapter() : false;
+    if (isBoss && bossBattleStarted) {
+      // Boss战中，自动提示触发概率降低到 30%（模拟更有挑战感）
+      if (Math.random() > 0.3) {
+        log.info('[AutoHint] Boss战中抑制自动提示');
+        return;
+      }
+    }
+
+    const requestedLevel = params.hintLevel || 1;
+    const reason = params.reason || 'stuck';
+    const charId = params.character || 'ayan';
+
+    // 记录自动提示到感知层（触发冷却）
+    expertSystem.onHint(true);
+
+    // === GameContext 同步：提示使用计数 ===
+    try {
+      if (global.GameContext && global.GameContext.player) {
+        global.GameContext.player.hintUsageCount++;
+      }
+    } catch (e) {}
+
+    // 调用 HintSystem 获取提示
+    const hint = hintSystem.getHint();
+    if (!hint) {
+      log.warn('[AutoHint] HintSystem 返回空');
+      return;
+    }
+
+    // 播放提示音效
+    if (typeof AudioService !== 'undefined') {
+      AudioService.sfx.play('hint');
+    }
+
+    // 喜剧系统防火墙：自动提示时喜剧静音（通过全局临时静音标志）
+    if (comedySystem) {
+      _autoHintMuteUntil = Date.now() + 5000; // 静音5秒
+    }
+
+    const { character, characterName, dialogue, target, targetCells, techniqueName,
+            isFirstEncounter, teachingDialog } = hint;
+
+    // 记录技巧遭遇（用于新手保护规则）
+    if (hint.technique && expertSystem && typeof expertSystem.onTechniqueEncounter === 'function') {
+      expertSystem.onTechniqueEncounter(hint.technique);
+    }
+
+    // 记录本次提示使用的技巧（用于正确填数时触发技巧类成就）
+    lastHintTechnique = techniqueName || null;
+
+    // 自动提示的提示计数：算 0.5 次（不消耗完整次数）
+    hintCount += 0.5;
+
+    // 累计总提示次数（自动提示算半次）
+    if (global.ProgressManager) {
+      ProgressManager.addHintCount(0.5);
+      if (currentChapterData && !currentLevelData.isHidden) {
+        ProgressManager.setChapterHintUsed(currentChapterData.chapterId);
+      }
+      ProgressManager.resetNoHintStreak();
+    }
+
+    EventLogger.log('game:auto_hint', {
+      character: characterName,
+      target,
+      targetCells,
+      technique: techniqueName,
+      reason,
+      hintLevel: hint.hintLevel,
+    });
+
+    // 清除之前的提示高亮
+    if (renderer && typeof renderer.clearHintHighlights === 'function') {
+      renderer.clearHintHighlights('hint');
+    }
+
+    // 选中目标格
+    if (target && board) {
+      let tRow, tCol;
+      if (target.row !== undefined && target.col !== undefined) {
+        tRow = target.row;
+        tCol = target.col;
+      } else if (target.cells && target.cells.length > 0) {
+        const first = target.cells[0];
+        if (first.row !== undefined && first.col !== undefined) {
+          tRow = first.row;
+          tCol = first.col;
+        }
+      }
+      if (tRow !== undefined && tCol !== undefined) {
+        board.selectCell(tRow, tCol);
+      }
+    }
+
+    renderer.render(board);
+
+    // 首次遇到技巧：播放完整教学对话
+    if (isFirstEncounter && teachingDialog && teachingDialog.length > 0 && storyEngine) {
+      playFirstEncounterTeaching(teachingDialog, character, techniqueName, targetCells);
+      return;
+    }
+
+    // 使用动画播放器（所有 deduction 类型提示都用动画播放）
+    if (renderer && typeof renderer.playHintAnimation === 'function'
+        && hint.hintType === 'deduction') {
+      // 自动提示添加前缀对话
+      hint._autoHintIntro = _getAutoHintIntro(charId, reason);
+      playHintAnimation(hint);
+      return;
+    }
+
+    // Fallback: 高亮 + 角色气泡
+    if (targetCells && targetCells.length > 0 && renderer && typeof renderer.highlightHintCells === 'function') {
+      renderer.highlightHintCells(targetCells, 'hint', 'hint');
+    }
+
+    if (techMatrix && hint.hintType === 'deduction') {
+      if (!hint._evidenceNormalized && typeof _normalizeEvidence === 'function') {
+        hint.evidence = _normalizeEvidence(hint);
+        hint._evidenceNormalized = true;
+      }
+      techMatrix.showEvidence(hint);
+    }
+
+    // 自动提示：显示带角色前缀的气泡
+    const intro = _getAutoHintIntro(charId, reason);
+    const prefix = techniqueName ? `【${techniqueName}】` : '';
+    const finalChar = params.character || character;
+    const finalCharName = params.character ? _getCharacterName(params.character) : characterName;
+    showCharacterBubble(finalChar, {
+      text: intro + ' ' + prefix + dialogue,
+      speakerName: finalCharName,
+      duration: 5000,
+      type: 'hint',
+    });
+  }
+
+  /**
+   * 获取自动提示的开场白
+   */
+  function _getAutoHintIntro(charId, reason) {
+    const intros = {
+      ayan: {
+        stuck: '让我看看...嗯，',
+        anxiety: '别急，',
+        novice: '这个嘛，',
+        flow_drop: '刚才思路不错，',
+      },
+      cagekeeper: {
+        stuck: '观察盘面。',
+        anxiety: '冷静下来。',
+        novice: '基础要打牢。',
+        flow_drop: '保持节奏。',
+      },
+      ying: {
+        stuck: '我来帮你看看！',
+        anxiety: '别着急别着急~',
+        novice: '我教你呀！',
+        flow_drop: '加油加油！',
+      },
+    };
+    const charIntros = intros[charId] || intros.ayan;
+    return charIntros[reason] || charIntros.stuck;
+  }
+
+  /**
+   * 获取角色中文名
+   */
+  function _getCharacterName(charId) {
+    const names = {
+      ayan: '阿妍',
+      cagekeeper: '守笼人',
+      ying: '莹莹',
+    };
+    return names[charId] || '阿妍';
   }
 
   // === Hint ===
@@ -5046,6 +5691,12 @@
 
     hintCount++;
     expertSystem.onHint();
+    // === GameContext 同步：手动提示计数 ===
+    try {
+      if (global.GameContext && global.GameContext.player) {
+        global.GameContext.player.hintUsageCount++;
+      }
+    } catch (e) {}
     // 累计总提示次数（用于真结局判定）
     if (global.ProgressManager) {
       ProgressManager.addHintCount(1);
@@ -7510,6 +8161,7 @@
 
       board.setNumber(num);
       AudioService.sfx.play('fill_correct');
+      vibrate(VIBRATE_PRESETS.FILL);
       expertSystem.onFillCorrect(r, c, num);
       // 连击系统：正确填数
       if (comboSystem) {
@@ -7592,7 +8244,7 @@
         }, 300);
       }
       // 震动反馈
-      if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
+      vibrate(VIBRATE_PRESETS.ERROR);
       errorCount++;
       expertSystem.onFillWrong(r, c, num);
       // 连击系统：错误填数
@@ -7687,6 +8339,36 @@
     let _lastGateCompleted = false;
     let _highlightTimer = null;
     let _firstCellClickListener = null;
+    let _bgmManaged = false;  // BGM 是否已由三幕式接管（避免重复干预）
+
+    // ============================================================
+    // BGM 动态强度控制
+    // 只有在 features.threeActGuide 开启且非 Boss 战时才生效
+    // 强度级别：Normal → Intense → Intense (雪崩) → Eureka
+    // ============================================================
+    function _isBossBattle() {
+      return typeof GuideBattle !== 'undefined' && GuideBattle.active;
+    }
+
+    function _setBgmIntensity(intensity, fadeMs) {
+      if (!_enabled) return;
+      if (_isBossBattle()) return; // Boss 战 BGM 由 Boss 战系统管理
+      if (typeof AudioService === 'undefined') return;
+      if (!AudioService.bgm || !AudioService.bgmPlaying) return;
+      try {
+        AudioService.bgm.transition(intensity, fadeMs);
+        _bgmManaged = true;
+        log.info('[ThreeActGuide] BGM intensity -> ' + intensity + ' (' + fadeMs + 'ms)');
+      } catch(e) {
+        console.debug('[ThreeActGuide] BGM transition failed:', e);
+      }
+    }
+
+    function resetBgm() {
+      if (!_bgmManaged) return;
+      _setBgmIntensity('Normal', 2000);
+      _bgmManaged = false;
+    }
 
     /**
      * 读取存储的显示记录
@@ -7886,9 +8568,18 @@
         _lastGateCompleted = false;
 
         if (!_enabled) { resolve(); return; }
-        if (!storyEngine) { resolve(); return; }
+        if (!storyEngine) {
+          // 即使没有 storyEngine，也要设置 BGM 强度
+          _setBgmIntensity('Normal', 1500);
+          resolve();
+          return;
+        }
 
         const levelId = currentLevelData.levelId;
+
+        // 无论是否已显示过对话，都设置第一幕 BGM 强度
+        _setBgmIntensity('Normal', 1500);
+
         if (_hasShown(levelId, ACTS.ACT1)) { resolve(); return; }
 
         _act1Started = true;
@@ -7922,6 +8613,9 @@
         if (!_enabled || !_act1Started) { resolve(); return; }
         if (!storyEngine || !renderer) { resolve(); return; }
         if (!currentLevelData) { resolve(); return; }
+
+        // === GameContext 同步：进入第一幕 + 统计各幕格子总数 ===
+        _syncActToGameContext(1);
 
         const levelId = currentLevelData.levelId;
         if (_hasShown(levelId, ACTS.ACT1)) { resolve(); return; }
@@ -7982,10 +8676,19 @@
       if (!currentLevelData) return;
 
       const levelId = currentLevelData.levelId;
-      if (_hasShown(levelId, ACTS.ACT2)) return;
       if (_act2Triggered) return;
 
       _act2Triggered = true;
+
+      // === GameContext 同步：进入第二幕 ===
+      _syncActToGameContext(2);
+
+      // 第二幕 BGM：Intense 强度（紧张博弈）—— 无论是否已显示对话都设置
+      _setBgmIntensity('Intense', 1500);
+
+      // 如果已显示过，只更新 BGM，不播放对话
+      if (_hasShown(levelId, ACTS.ACT2)) return;
+
       _markShown(levelId, ACTS.ACT2);
 
       // 高亮所有 gate 格（红色调，用 error 类型）
@@ -8049,10 +8752,19 @@
       if (!currentLevelData) return;
 
       const levelId = currentLevelData.levelId;
-      if (_hasShown(levelId, ACTS.ACT3)) return;
       if (_act3Triggered) return;
 
       _act3Triggered = true;
+
+      // === GameContext 同步：进入第三幕 ===
+      _syncActToGameContext(3);
+
+      // 第三幕 BGM：保持 Intense 强度（雪崩阶段已足够紧张）—— 无论是否已显示都设置
+      _setBgmIntensity('Intense', 1500);
+
+      // 如果已显示过，只更新 BGM，不播放动画
+      if (_hasShown(levelId, ACTS.ACT3)) return;
+
       _markShown(levelId, ACTS.ACT3);
 
       // 停止 Gate 格脉动（如果还在运行）
@@ -8210,6 +8922,70 @@
       _updateThreeActDot(actNum);
     }
 
+    // ============================================================
+    //  GameContext 同步：三幕进度写入中央状态
+    // ============================================================
+
+    /**
+     * 将当前幕次和三幕进度同步到 GameContext.level
+     * 在幕次切换和填数检查时调用
+     * @param {number} actNum - 当前幕次（1/2/3）
+     */
+    function _syncActToGameContext(actNum) {
+      try {
+        const ctx = global.GameContext;
+        if (!ctx || !ctx.level) return;
+
+        ctx.level.act = actNum;
+
+        // 如果可以获取到详细进度，也同步过去
+        if (typeof WinConditionManager !== 'undefined' && board && currentLevelData) {
+          try {
+            const progress = WinConditionManager.getProgress(board, currentLevelData, false);
+            if (progress && progress.stats) {
+              const s = progress.stats;
+              ctx.level.simpleFilled = s.simple ? s.simple.filled : 0;
+              ctx.level.simpleTotal = s.simple ? s.simple.total : 0;
+              ctx.level.gateFilled = s.gate ? s.gate.filled : 0;
+              ctx.level.gateTotal = s.gate ? s.gate.total : 0;
+              ctx.level.coreFilled = s.core ? s.core.filled : 0;
+              ctx.level.coreTotal = s.core ? s.core.total : 0;
+            }
+          } catch (e) {
+            // 获取进度失败不影响主流程
+          }
+        }
+
+        log.debug('[ThreeActGuide] GameContext 同步: act=' + actNum);
+      } catch (e) {
+        console.warn('[ThreeActGuide] _syncActToGameContext error:', e);
+      }
+    }
+
+    /**
+     * 更新 GameContext 中的三幕进度（每次填数后调用，轻量级）
+     */
+    function _syncActProgressToGameContext() {
+      try {
+        const ctx = global.GameContext;
+        if (!ctx || !ctx.level) return;
+        if (typeof WinConditionManager === 'undefined' || !board || !currentLevelData) return;
+
+        const progress = WinConditionManager.getProgress(board, currentLevelData, false);
+        if (!progress || !progress.stats) return;
+
+        const s = progress.stats;
+        ctx.level.simpleFilled = s.simple ? s.simple.filled : 0;
+        ctx.level.simpleTotal = s.simple ? s.simple.total : 0;
+        ctx.level.gateFilled = s.gate ? s.gate.filled : 0;
+        ctx.level.gateTotal = s.gate ? s.gate.total : 0;
+        ctx.level.coreFilled = s.core ? s.core.filled : 0;
+        ctx.level.coreTotal = s.core ? s.core.total : 0;
+      } catch (e) {
+        // 静默失败
+      }
+    }
+
     /**
      * 每次填数后检查阶段切换（在 checkCompletion 中调用）
      * 检测 simple 完成 → 第二幕·破局
@@ -8225,6 +9001,9 @@
 
       // 更新幕次指示器
       _updateActIndicator(stats);
+
+      // === GameContext 同步：每次填数后更新三幕进度 ===
+      _syncActProgressToGameContext();
 
       // 检测 simple 完成状态切换 → 第二幕
       const simpleCompleted = stats.simple.total > 0 && stats.simple.filled >= stats.simple.total;
@@ -8279,6 +9058,8 @@
     function setComplete() {
       if (!_enabled) return;
       _updateThreeActDot('complete');
+      // 通关：Eureka 强度（高潮版）
+      _setBgmIntensity('Eureka', 500);
     }
 
     // ============================================================
@@ -8310,6 +9091,9 @@
       // 隐藏棋盘上方指示灯
       _updateThreeActDot(null);
 
+      // 重置 BGM 强度
+      resetBgm();
+
       _enabled = false;
       _act1Started = false;
       _act2Triggered = false;
@@ -8331,6 +9115,7 @@
       onFillCheck,
       setComplete,
       cleanup,
+      resetBgm,
     };
 
   })();
@@ -9310,7 +10095,7 @@
     if (result.filled && result.errors.length > 0) {
       try { highlightAllErrors(); } catch(e) {}
       showToast('还有地方不对哦~');
-      if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
+      vibrate(VIBRATE_PRESETS.ERROR);
     }
   }
 
@@ -9535,6 +10320,17 @@
     } catch(e) {
       log.error('expertSystem.onLevelEnd error:', e);
     }
+
+    // === GameContext 学习层：关卡结束时更新玩家风格 ===
+    try {
+      if (expertSystem && expertSystem.learning &&
+          typeof expertSystem.learning.updateStyleFromContext === 'function') {
+        expertSystem.learning.updateStyleFromContext();
+      }
+    } catch(e) {
+      log.warn('learning.updateStyleFromContext error:', e);
+    }
+
     // 用 gameTimer 获取时间（如果可用），否则回退到 startTime 计算
     const elapsed = gameTimer ? gameTimer.getTime() : Math.floor((Date.now() - startTime) / 1000);
     const minutes = Math.floor(elapsed / 60);
@@ -9729,7 +10525,7 @@
       } catch(e) {}
       // 震动效果（如果设备支持）
       try {
-        if (navigator.vibrate) navigator.vibrate([50, 20, 30]);
+        vibrate(VIBRATE_PRESETS.CLIMAX);
       } catch(e) {}
       // overlay 震动
       setTimeout(() => {
@@ -10506,7 +11302,7 @@
           const overlay = document.getElementById('complete-overlay');
           if (overlay) overlay.style.display = 'none';
         } else {
-          window.location.href = 'guide.html?id=' + nextLevelId;
+          navigateTo('guide.html?id=' + nextLevelId);
         }
       } else {
         // Fallback: try currentLevelId + 1
@@ -10514,7 +11310,7 @@
         if (startedFromSelect && chapterSelect) {
           startLevel(fallbackId);
         } else {
-          window.location.href = 'guide.html?id=' + fallbackId;
+          navigateTo('guide.html?id=' + fallbackId);
         }
       }
     }
@@ -10628,14 +11424,14 @@
         // In-page navigation
         startLevel(firstLevelId);
       } else {
-        window.location.href = 'guide.html?id=' + firstLevelId;
+        navigateTo('guide.html?id=' + firstLevelId);
       }
     } else {
       // Fallback: try currentLevelId + 1
       if (startedFromSelect && chapterSelect) {
         startLevel(parseInt(currentLevelId) + 1);
       } else {
-        window.location.href = 'guide.html?id=' + (parseInt(currentLevelId) + 1);
+        navigateTo('guide.html?id=' + (parseInt(currentLevelId) + 1));
       }
     }
   }
@@ -10993,6 +11789,23 @@
       });
     });
 
+    // === TRIGGER_HINT: 自动提示（决策层触发）===
+    // 优先级高于 SHOW_TOAST，低于 EUREKA 和 TEACHING
+    expertSystem.expression.registerActionHandler('TRIGGER_HINT', (params) => {
+      // 如果正在播放教学引导，不自动提示
+      if (lessonPlayer && lessonPlayer.isActive) return;
+
+      // 如果已有提示动画在播放，排队或替换
+      if (typeof HintPlayerState !== 'undefined' && HintPlayerState.playing) {
+        // 已有提示在播放，不打断
+        log.info('[AutoHint] 已有提示在播放，跳过本次自动提示');
+        return;
+      }
+
+      // 执行自动提示
+      showAutoHint(params);
+    });
+
     log.info('Expert character handlers registered');
   }
 
@@ -11163,8 +11976,12 @@
     if (global.ProgressManager && currentLevelId) {
       ProgressManager.setLastPlayedLevel(currentLevelId);
     }
-    // 跳转到主菜单
-    window.location.href = 'menu.html';
+    // 重置三幕式 BGM
+    if (typeof ThreeActGuide !== 'undefined') {
+      try { ThreeActGuide.resetBgm(); } catch(e) {}
+    }
+    // 跳转到主菜单（带翻页过渡）
+    navigateTo('menu.html');
   }
 
   // === Toast ===

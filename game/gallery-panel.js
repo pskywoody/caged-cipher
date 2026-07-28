@@ -1244,11 +1244,33 @@
 
     // === 数据访问 ===
 
-    _loadUnlockData() {
+    /**
+     * 从 localStorage 读取并解包进度数据
+     * 兼容新版包装格式 { version, data, checksum } 和旧版裸数据
+     * @returns {Object|null} 进度数据对象
+     */
+    _readProgressData() {
       try {
         const raw = localStorage.getItem(PROGRESS_KEY);
-        if (raw) {
-          const progress = JSON.parse(raw);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        // 兼容新版包装格式
+        if (parsed && typeof parsed === 'object' &&
+            'version' in parsed && 'data' in parsed && 'checksum' in parsed &&
+            typeof parsed.data === 'object') {
+          return parsed.data;
+        }
+        // 旧版格式
+        return parsed;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    _loadUnlockData() {
+      try {
+        const progress = this._readProgressData();
+        if (progress) {
           return progress.galleryUnlock || { characters: {}, backgrounds: [] };
         }
       } catch (e) {}
@@ -1258,9 +1280,28 @@
     _saveUnlockData() {
       try {
         const raw = localStorage.getItem(PROGRESS_KEY);
-        const progress = raw ? JSON.parse(raw) : {};
+        let parsed = raw ? JSON.parse(raw) : {};
+        let progress;
+        // 判断是否为新版包装格式
+        if (parsed && typeof parsed === 'object' &&
+            'version' in parsed && 'data' in parsed && 'checksum' in parsed &&
+            typeof parsed.data === 'object') {
+          progress = parsed.data;
+        } else {
+          progress = parsed;
+        }
         progress.galleryUnlock = this._unlockData;
-        localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+
+        // 写回时保持原有格式
+        if (parsed && typeof parsed === 'object' &&
+            'version' in parsed && 'data' in parsed && 'checksum' in parsed) {
+          parsed.data = progress;
+          // 注意：这里不重新计算 checksum，因为 GalleryPanel 不持有算法
+          // 正常流程下由 ProgressManager.save() 统一处理，这里仅做最佳努力
+          localStorage.setItem(PROGRESS_KEY, JSON.stringify(parsed));
+        } else {
+          localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+        }
       } catch (e) {
         // 专门处理容量超限错误
         if (e.name === 'QuotaExceededError' || e.code === 22) {
@@ -1278,9 +1319,8 @@
 
     _isLevelCleared(levelId) {
       try {
-        const raw = localStorage.getItem(PROGRESS_KEY);
-        if (raw) {
-          const progress = JSON.parse(raw);
+        const progress = this._readProgressData();
+        if (progress) {
           return !!(progress.levelScores && progress.levelScores[levelId]);
         }
       } catch (e) {}

@@ -21,6 +21,11 @@
         teaching_nudge: config.teachingCooldown || 60000,
         eureka_burst: config.eurekaCooldown || 30000,
         progress_milestone: config.progressCooldown || 5000,
+        // 自动提示冷却
+        auto_hint_stuck: config.autoHintStuckCooldown || 60000,
+        auto_hint_anxiety: config.autoHintAnxietyCooldown || 45000,
+        auto_hint_flow_drop: config.autoHintFlowDropCooldown || 90000,
+        auto_hint_novice: config.autoHintNoviceCooldown || 30000,
       };
 
       // Current active cooldowns (may be adjusted dynamically)
@@ -57,6 +62,24 @@
           payload: { level: 3, message: '连击爆发！' },
           cooldownKey: 'eureka_burst',
         },
+        // === 规则 A：卡住自动提示 ===
+        // 玩家真的卡住了，主动递一个提示（L1 观察级）
+        {
+          id: 'auto_hint_stuck',
+          priority: 85,
+          check: (s) => {
+            if (!s.isStuck) return false;
+            if (!s.hintCooldown) return false;
+            // 卡住持续 >= 60秒
+            if ((s.stuckDuration || 0) < 60000) return false;
+            // 提示冷却已过
+            if (!s.hintCooldown.canAutoHint) return false;
+            return true;
+          },
+          action: 'TRIGGER_HINT',
+          payload: { hintLevel: 1, reason: 'stuck', character: 'ayan' },
+          cooldownKey: 'auto_hint_stuck',
+        },
         {
           id: 'stuck_guide',
           priority: 80,
@@ -64,6 +87,28 @@
           action: 'SHOW_TOAST',
           payload: { message: '需要提示吗？试试换个角度看盘面。' },
           cooldownKey: 'stuck_guide',
+        },
+        // === 规则 B：焦虑自动提示 ===
+        // 玩家越错越急，给个提示帮他稳住（L1 或 L2）
+        {
+          id: 'auto_hint_anxiety',
+          priority: 75,
+          check: (s) => {
+            if (!s.isAnxious) return false;
+            if (!s.hintCooldown) return false;
+            // 连续错误 >= 3次
+            if (s.consecutiveWrong < 3) return false;
+            // 提示冷却已过
+            if (!s.hintCooldown.canAutoHint) return false;
+            return true;
+          },
+          action: 'TRIGGER_HINT',
+          payload: {
+            hintLevel: (s) => s.consecutiveWrong >= 5 ? 2 : 1,
+            reason: 'anxiety',
+            character: 'cagekeeper',
+          },
+          cooldownKey: 'auto_hint_anxiety',
         },
         {
           id: 'anxiety_cooldown',
@@ -73,6 +118,26 @@
           payload: { message: '别急，慢慢来。错误是学习的一部分。' },
           cooldownKey: 'anxiety_cooldown',
         },
+        // === 规则 D：新手保护提示 ===
+        // 新手第一次遇到困难技巧，主动教学（L1 观察级，更详细）
+        {
+          id: 'auto_hint_novice',
+          priority: 65,
+          check: (s) => {
+            // 玩家等级判定：总正确数 < 20 视为新手
+            if (s.totalCorrect > 20) return false;
+            if (!s.isStuck) return false;
+            if (!s.hintCooldown) return false;
+            // 卡住 30秒以上
+            if ((s.stuckDuration || 0) < 30000) return false;
+            // 提示冷却已过
+            if (!s.hintCooldown.canAutoHint) return false;
+            return true;
+          },
+          action: 'TRIGGER_HINT',
+          payload: { hintLevel: 1, reason: 'novice', character: 'ying', isNovice: true },
+          cooldownKey: 'auto_hint_novice',
+        },
         {
           id: 'flow_encouragement',
           priority: 60,
@@ -80,6 +145,28 @@
           action: 'SHOW_TOAST',
           payload: { message: '心流状态！继续保持！' },
           cooldownKey: 'flow_encouragement',
+        },
+        // === 规则 C：心流减弱提示 ===
+        // 心流断了，轻轻推一把（Toast 鼓励 + 暗示方向）
+        {
+          id: 'auto_hint_flow_drop',
+          priority: 50,
+          check: (s) => {
+            // 曾经进入过心流（flowDepth > 0 但当前不在 flow）
+            if (s.inFlowState) return false;
+            if ((s.flowDepth || 0) <= 0) return false;
+            // 当前有点卡住（但还没到 stuck 状态）
+            if (!s.isStuck) return false;
+            if ((s.stuckDuration || 0) < 20000) return false;
+            return true;
+          },
+          action: 'SHOW_TOAST',
+          payload: {
+            message: '刚才能感很好，继续那个思路试试？',
+            level: 'encourage',
+            character: 'ayan',
+          },
+          cooldownKey: 'auto_hint_flow_drop',
         },
         {
           id: 'progress_milestone',
@@ -139,6 +226,19 @@
         }
         if (key === 'flow_encouragement' || key === 'eureka_burst') {
           value = value * stateMultipliers.encouragement;
+        }
+        // 自动提示相关冷却
+        if (key === 'auto_hint_stuck') {
+          value = value * stateMultipliers.stuckGuide;
+        }
+        if (key === 'auto_hint_anxiety') {
+          value = value * stateMultipliers.anxiety;
+        }
+        if (key === 'auto_hint_flow_drop') {
+          value = value * stateMultipliers.encouragement;
+        }
+        if (key === 'auto_hint_novice') {
+          value = value * stateMultipliers.stuckGuide * 0.8; // 新手提示更频繁
         }
 
         // Apply proficiency adjustment
@@ -377,11 +477,21 @@
         if (now - lastTime < coolDown) continue;
 
         this._coolDownMap[rule.id] = now;
+
+        // 处理动态 payload：如果 payload 的值是函数，传入 state 计算
+        const payload = {};
+        if (rule.payload) {
+          for (const key of Object.keys(rule.payload)) {
+            const val = rule.payload[key];
+            payload[key] = typeof val === 'function' ? val(state) : val;
+          }
+        }
+
         commands.push({
           target: 'ExpressionDirector',
           action: rule.action,
           priority: rule.priority,
-          payload: { ...rule.payload },
+          payload,
         });
 
         // High priority rules stop processing
@@ -390,6 +500,147 @@
 
       this._lastDecision = commands.length > 0 ? commands[0] : null;
       return commands;
+    }
+
+    /**
+     * 从 GameContext 读取状态进行决策
+     * 这是五层联动的主入口：感知层/ComboSystem 写入 GameContext → 触发此方法
+     * 同时执行"行动型"规则（如 AI 速度调整）
+     * @returns {Array} 决策命令列表
+     */
+    evaluateFromContext() {
+      try {
+        const ctx = global.GameContext;
+        if (!ctx || !ctx.player) return [];
+
+        if (!this._levelActive) return [];
+
+        const player = ctx.player;
+        const level = ctx.level;
+
+        // 构建兼容旧版 state 对象（向后兼容现有规则）
+        const state = {
+          isStuck: player.stuck,
+          stuckDuration: player.stuck ? 60000 : 0, // 简化值，感知层有更精确的数据
+          isAnxious: player.anxious,
+          anxiousDuration: player.anxious ? 5000 : 0,
+          inFlowState: player.flow === 'flow' || player.flow === 'eureka',
+          flowDepth: player.combo,
+          consecutiveCorrect: player.combo,
+          consecutiveWrong: player.consecutiveWrong,
+          totalCorrect: player.totalCorrect,
+          totalWrong: player.totalWrong,
+          eurekaCount: this.gridSize <= 4 ? 4 : (this.gridSize === 6 ? 6 : 8),
+          gridSize: this.gridSize,
+          hintCooldown: {
+            canAutoHint: this._canAutoHintFromContext(),
+          },
+          // 三幕式信息
+          act: level.act,
+          isBossBattle: level.isBossBattle,
+        };
+
+        // 执行行动型规则（直接作用于游戏，不经表达层）
+        this._executeActionRules(player, level);
+
+        // 执行表达型规则（经表达层输出）
+        return this.decide(state);
+      } catch (e) {
+        console.warn('[DecisionEngine] evaluateFromContext error:', e);
+        return [];
+      }
+    }
+
+    /**
+     * 从 GameContext 推断自动提示是否可用
+     * @returns {boolean}
+     */
+    _canAutoHintFromContext() {
+      try {
+        // 如果有感知层实例，用它的精确判断
+        if (global.ExpertSystem && global.ExpertSystem.perception &&
+            typeof global.ExpertSystem.perception.canAutoHint === 'function') {
+          return global.ExpertSystem.perception.canAutoHint();
+        }
+        // 降级：简单基于提示次数判断
+        return true;
+      } catch (e) {
+        return true;
+      }
+    }
+
+    /**
+     * 执行行动型规则（不经过表达层，直接改变游戏参数）
+     * 目前包括：AI 速度调整
+     * @param {Object} player - GameContext.player
+     * @param {Object} level - GameContext.level
+     */
+    _executeActionRules(player, level) {
+      // 行动型规则只在 Boss 战中生效（非 Boss 战没有 AI）
+      if (!level.isBossBattle) return;
+
+      const now = Date.now();
+      const ctx = global.GameContext;
+
+      // --- 规则 1：EUREKA 驱动 AI 加速 ---
+      // flow === 'eureka' 时，AI 速度 ×1.2
+      const eurekaKey = 'ai_speed_eureka';
+      if (player.flow === 'eureka') {
+        if (!ctx.isInCooldown(eurekaKey + '_active')) {
+          this._applyAISpeedMultiplier(1.2, 'eureka');
+          ctx.setCooldown(eurekaKey + '_active', 8000); // 8秒内不重复触发
+          ctx.setCooldown(eurekaKey + '_applied', 8000); // 标记正在生效
+        }
+      } else {
+        // 退出 eureka 状态且生效期已过，重置
+        if (ctx.isInCooldown(eurekaKey + '_applied')) {
+          // 等冷却自然过期后由定时器清理
+        }
+      }
+
+      // --- 规则 2：心流驱动 AI 加速 ---
+      // flow === 'flow' && combo >= 10 时，AI 速度 ×1.1
+      const flowKey = 'ai_speed_flow';
+      if (player.flow === 'flow' && player.combo >= 10) {
+        if (!ctx.isInCooldown(flowKey + '_active')) {
+          this._applyAISpeedMultiplier(1.1, 'flow');
+          ctx.setCooldown(flowKey + '_active', 10000); // 10秒内不重复触发
+          ctx.setCooldown(flowKey + '_applied', 10000);
+        }
+      }
+
+      // --- 规则 3：焦虑时 AI 减速 ---
+      // anxious === true && consecutiveWrong >= 3 时，AI 速度 ×0.7
+      const anxietyKey = 'ai_speed_anxiety';
+      if (player.anxious && player.consecutiveWrong >= 3) {
+        if (!ctx.isInCooldown(anxietyKey + '_active')) {
+          this._applyAISpeedMultiplier(0.7, 'anxiety');
+          ctx.setCooldown(anxietyKey + '_active', 12000); // 12秒内不重复触发
+          ctx.setCooldown(anxietyKey + '_applied', 12000);
+        }
+      }
+    }
+
+    /**
+     * 应用 AI 速度调整（调用全局函数）
+     * @param {number} factor - 速度倍率
+     * @param {string} reason - 调整原因
+     */
+    _applyAISpeedMultiplier(factor, reason) {
+      try {
+        if (typeof global._setAISpeedMultiplier === 'function') {
+          // 持续时间根据 reason 不同而不同
+          const durations = {
+            eureka: 8000,
+            flow: 10000,
+            anxiety: 12000,
+          };
+          const duration = durations[reason] || 8000;
+          global._setAISpeedMultiplier(factor, reason, duration);
+        }
+      } catch (e) {
+        console.warn('[DecisionEngine] _applyAISpeedMultiplier error:', e);
+      }
     }
   }
 

@@ -65,6 +65,25 @@
           try { this._feedbackCallback(msg, 'success'); } catch(e) {}
         }
       });
+
+      // TRIGGER_HINT: 触发自动提示（默认实现为 Toast，实际由 guide.js 覆盖）
+      this.expression.registerActionHandler('TRIGGER_HINT', (params) => {
+        const reason = params.reason || 'stuck';
+        const level = params.hintLevel || 1;
+        const reasonText = {
+          stuck: '看你思考了很久，给你一个小提示。',
+          anxiety: '别急，先看看这个方向。',
+          novice: '这个技巧可能不太熟悉，我来提示一下~',
+          flow_drop: '刚才能感很好，试试这个方向？',
+        };
+        const msg = reasonText[reason] || '给你一个小提示。';
+        if (typeof global.showToast === 'function') {
+          global.showToast(msg + `（L${level}级）`, 3000);
+        }
+        if (this._feedbackCallback) {
+          try { this._feedbackCallback(msg, 'hint'); } catch(e) {}
+        }
+      });
     }
 
     _getDialogText(id) {
@@ -163,10 +182,20 @@
       this.perception.onNote(row, col, num);
     }
 
-    onHint() {
-      this.perception.onHint();
+    onHint(auto = false) {
+      this.perception.onHint(auto);
       this.learning.recordHint();
       this._decideAndExecute();
+    }
+
+    /**
+     * 记录技巧遭遇（用于新手保护规则）
+     * @param {string} techniqueId
+     */
+    onTechniqueEncounter(techniqueId) {
+      if (this.perception && typeof this.perception.recordTechniqueEncounter === 'function') {
+        this.perception.recordTechniqueEncounter(techniqueId);
+      }
     }
 
     onPause() {

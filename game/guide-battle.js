@@ -435,6 +435,8 @@ const GuideBattle = {
     this._renderer = options.renderer;
     this.solution = options.solution;
     this.opponent = options.opponent;
+    // GameContext 联动：上下文速度倍率（初始为 1.0 = 无调整）
+    this._contextSpeedMultiplier = 1.0;
     // 修正：使用 board.size 而非 gridSize（与 Board 类保持一致）
     this.size = options.board.size || 9;
     this._warningTriggered = false;
@@ -1381,6 +1383,73 @@ const GuideBattle = {
     return this._difficulty ? this._difficulty.speedMultiplier : 1.0;
   },
 
+  // ============================================================
+  //  GameContext 联动：上下文速度调整
+  // ============================================================
+  //  由决策层通过 GameContext → _setAISpeedMultiplier → 此方法
+  //  动态调整 AI 速度，支持多 reason 独立叠加
+  // ============================================================
+
+  /**
+   * 设置 GameContext 驱动的速度倍率
+   * 这个倍率会与动态难度倍率叠加
+   * @param {number} totalFactor - 总速度倍率（所有 reason 相乘后的结果）
+   * @param {string} reason - 触发原因（用于日志）
+   */
+  setContextSpeedMultiplier(totalFactor, reason) {
+    try {
+      if (!this._difficulty) return;
+
+      // 限制范围
+      totalFactor = Math.max(0.3, Math.min(2.0, totalFactor));
+
+      this._contextSpeedMultiplier = totalFactor;
+
+      console.log('[GuideBattle] 上下文速度调整:',
+        'reason=' + reason,
+        'factor=' + totalFactor.toFixed(2));
+
+      // 如果 AI 正在思考中，打断并重新调度（让新速度立即生效）
+      if (this._aiThinking && this._aiTimer) {
+        clearTimeout(this._aiTimer);
+        this._aiTimer = null;
+        this._aiThinking = false;
+        this._scheduleAiMove();
+      }
+    } catch (e) {
+      console.warn('[GuideBattle] setContextSpeedMultiplier error:', e);
+    }
+  },
+
+  /**
+   * 获取当前 GameContext 驱动的速度倍率
+   * @returns {number}
+   */
+  getContextSpeedMultiplier() {
+    return this._contextSpeedMultiplier || 1.0;
+  },
+
+  /**
+   * 重置 GameContext 驱动的速度倍率
+   * @param {string} reason - 重置原因
+   */
+  resetContextSpeedMultiplier(reason) {
+    try {
+      this._contextSpeedMultiplier = 1.0;
+      console.log('[GuideBattle] 上下文速度重置 reason=' + (reason || 'unknown'));
+
+      // 如果 AI 正在思考中，重新调度
+      if (this._aiThinking && this._aiTimer) {
+        clearTimeout(this._aiTimer);
+        this._aiTimer = null;
+        this._aiThinking = false;
+        this._scheduleAiMove();
+      }
+    } catch (e) {
+      console.warn('[GuideBattle] resetContextSpeedMultiplier error:', e);
+    }
+  },
+
   // ======================================================
   //  多阶段预警系统 v2.0
   // ======================================================
@@ -1924,7 +1993,10 @@ const GuideBattle = {
     // 动态难度倍率：根据玩家速度实时调整
     const dynMul = this.getSpeedMultiplier();
 
-    const delay = baseDelay * speedMul * sizeMul * dynMul;
+    // GameContext 上下文速度倍率（由决策层心流/焦虑等状态驱动）
+    const ctxMul = this.getContextSpeedMultiplier();
+
+    const delay = baseDelay * speedMul * sizeMul * dynMul * ctxMul;
 
     // 拦截冷却递减
     if (this._interceptCooldown > 0) {

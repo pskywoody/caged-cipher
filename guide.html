@@ -4607,9 +4607,11 @@
   </style>
 </head>
 <body>
+  <!-- 页面转场遮罩 -->
+  <div id="page-transition-overlay" class="page-transition-overlay"></div>
   <!-- Boss战预警红光覆盖层 -->
   <div id="boss-warning-overlay"></div>
-  <div id="game-container">
+  <div id="game-container" class="page-transition-root page-enter">
     <!-- 顶部状态栏（竖屏） -->
     <div id="game-header">
       <div class="header-left">
@@ -5110,7 +5112,8 @@
     </div>
   </div>
 
-  <!-- Core -->
+  <!-- Core (ErrorReporter must be first to catch all errors) -->
+  <script src="core/error-reporter.js?v=1"></script>
   <script src="core/event-bus.js?v=3"></script>
   <script src="core/logger.js?v=3"></script>
   <script src="core/event-logger.js?v=1"></script>

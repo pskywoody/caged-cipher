@@ -67,6 +67,63 @@
       return this._data.style || { value: 'balanced', confidence: 0.5 };
     }
 
+    /**
+     * 从 GameContext 读取准确率和提示率，计算并更新玩家风格
+     * 在每关结束时调用，更新 GameContext.learning.style
+     * @returns {Object} 更新后的风格 { value, confidence }
+     */
+    updateStyleFromContext() {
+      try {
+        const ctx = global.GameContext;
+        if (!ctx || !ctx.player) {
+          return this.getStyle();
+        }
+
+        const player = ctx.player;
+        const totalFills = player.totalCorrect + player.totalWrong;
+
+        if (totalFills === 0) {
+          return this.getStyle();
+        }
+
+        const accuracy = player.totalCorrect / totalFills;
+        const hintRate = player.hintUsageCount / Math.max(totalFills, 1);
+
+        let value = 'balanced';
+        let confidence = 0.5;
+
+        if (accuracy > 0.9 && hintRate < 0.05) {
+          value = 'precise';
+          confidence = Math.min(0.9, accuracy);
+        } else if (accuracy < 0.6) {
+          value = 'experimental';
+          confidence = Math.min(0.8, 1 - accuracy);
+        } else if (hintRate > 0.3) {
+          value = 'cautious';
+          confidence = Math.min(0.8, hintRate);
+        }
+
+        // 更新内部数据
+        this._data.style = { value, confidence };
+        this._data.totalFills = (this._data.totalFills || 0) + totalFills;
+        this._data.correctFills = (this._data.correctFills || 0) + player.totalCorrect;
+        this._data.hintsUsed = (this._data.hintsUsed || 0) + player.hintUsageCount;
+        this._save();
+
+        // 同步到 GameContext
+        if (ctx.learning) {
+          ctx.learning.style = value;
+          ctx.learning.accuracyRate = accuracy;
+          ctx.learning.hintUsageRate = hintRate;
+        }
+
+        return { value, confidence };
+      } catch (e) {
+        console.warn('[LearningSystem] updateStyleFromContext error:', e);
+        return this.getStyle();
+      }
+    }
+
     getTechniqueProficiency(name) {
       const t = this._data.techniques[name];
       if (!t || t.attempts === 0) return 0;

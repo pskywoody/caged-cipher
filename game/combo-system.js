@@ -183,6 +183,10 @@
 
       // 视觉反馈
       this._updateComboUI();
+
+      // === GameContext 同步 + 触发决策 ===
+      this._syncToGameContext();
+      this._triggerDecisionIfReady();
     }
 
     /**
@@ -208,6 +212,10 @@
         // 正常模式：错误归零
         this._breakCombo('wrong');
       }
+
+      // === GameContext 同步 + 触发决策 ===
+      this._syncToGameContext();
+      this._triggerDecisionIfReady();
     }
 
     /**
@@ -219,6 +227,10 @@
       if (this.count > 0) {
         this._breakCombo('erase');
       }
+
+      // === GameContext 同步 + 触发决策 ===
+      this._syncToGameContext();
+      this._triggerDecisionIfReady();
     }
 
     /**
@@ -261,6 +273,9 @@
       this._currentFlowState = 'cold';
       this._hideComboUI();
       this._hideFlowGlow();
+
+      // === GameContext 同步 ===
+      this._syncToGameContext();
     }
 
     /**
@@ -654,6 +669,16 @@
       if (this.onFlowStateChange) {
         try { this.onFlowStateChange(state, this.count); } catch (e) {}
       }
+
+      // === GameContext 同步：心流状态变化 ===
+      try {
+        const ctx = typeof window !== 'undefined' ? window.GameContext : null;
+        if (ctx && ctx.player) {
+          ctx.player.flow = state;
+        }
+      } catch (e) {
+        // 静默失败
+      }
     }
 
     _updateFlowIntensity() {
@@ -830,6 +855,51 @@
         this._setTimeout(() => {
           if (p.parentNode) p.parentNode.removeChild(p);
         }, 1300);
+      }
+    }
+
+    // ============================================================
+    //  GameContext 集成方法
+    // ============================================================
+
+    /**
+     * 将连击和心流状态同步到 GameContext
+     * ComboSystem 是 combo 和 flow 的主写入方
+     */
+    _syncToGameContext() {
+      try {
+        const ctx = typeof window !== 'undefined' ? window.GameContext : null;
+        if (!ctx || !ctx.player) return;
+
+        ctx.player.combo = this.count;
+        // flow 状态在 _setFlowState 中实时更新，这里也做一次同步确保一致
+        ctx.player.flow = this._currentFlowState;
+      } catch (e) {
+        // 静默失败，避免影响连击系统本身
+      }
+    }
+
+    /**
+     * 触发决策引擎评估（节流版）
+     * 最小间隔 500ms
+     */
+    _triggerDecisionIfReady() {
+      try {
+        const now = Date.now();
+        if (!this._lastDecisionTriggerTime) {
+          this._lastDecisionTriggerTime = 0;
+        }
+        if (now - this._lastDecisionTriggerTime < 500) return;
+        this._lastDecisionTriggerTime = now;
+
+        // 优先使用 expertSystem.decision
+        const g = typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : {});
+        if (g.ExpertSystem && g.ExpertSystem.decision &&
+            typeof g.ExpertSystem.decision.evaluateFromContext === 'function') {
+          g.ExpertSystem.decision.evaluateFromContext();
+        }
+      } catch (e) {
+        // 静默失败
       }
     }
   }

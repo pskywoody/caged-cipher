@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Caged Cipher · 笼中密码</title>
+  <link rel="stylesheet" href="assets/css/style.css">
   <style>
     /* ============================================
        Design Tokens · 设计令牌
@@ -749,7 +750,9 @@
   </style>
 </head>
 <body>
-  <div class="cover">
+  <!-- 页面转场遮罩 -->
+  <div id="page-transition-overlay" class="page-transition-overlay"></div>
+  <div class="cover page-transition-root page-enter">
     <span class="corner-mark tl">✦</span>
     <span class="corner-mark tr">✦</span>
     <span class="corner-mark bl">✦</span>
@@ -964,10 +967,22 @@
     const SETTINGS_KEY = 'game_settings';
 
     // === 读取进度 ===
+    // 兼容两种格式：
+    //   新版: { version, data, checksum }
+    //   旧版: 直接是数据对象
     function getProgress() {
       try {
         const raw = localStorage.getItem(PROGRESS_KEY);
-        if (raw) return JSON.parse(raw);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        // 判断是否为新版包装格式
+        if (parsed && typeof parsed === 'object' &&
+            'version' in parsed && 'data' in parsed && 'checksum' in parsed &&
+            typeof parsed.data === 'object') {
+          return parsed.data;
+        }
+        // 旧版格式
+        return parsed;
       } catch (e) {}
       return null;
     }
@@ -1026,6 +1041,44 @@
       divider.style.display = 'block';
     }
 
+    // === 页面导航（带翻页过渡动画 + 音效）===
+    let _isNavigating = false;
+
+    function navigateTo(url, options) {
+      if (_isNavigating) return;
+      _isNavigating = true;
+
+      options = options || {};
+      const delay = options.delay !== undefined ? options.delay : 400;
+
+      // 播放翻页音效（使用 Web Audio 兜底）
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        // 简单的翻页音效模拟：短促的白噪声衰减
+        const bufferSize = audioCtx.sampleRate * 0.2;
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize) * 0.3;
+        }
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        const gain = audioCtx.createGain();
+        gain.gain.value = 0.3;
+        source.connect(gain);
+        gain.connect(audioCtx.destination);
+        source.start();
+      } catch(e) {}
+
+      // 播放离开动画
+      const root = document.querySelector('.page-transition-root') || document.body;
+      root.classList.add('page-leave');
+
+      setTimeout(() => {
+        window.location.href = url;
+      }, delay);
+    }
+
     // === 跳转到游戏 ===
     function goToGame(levelId, fromChapterSelect) {
       let url = 'guide.html';
@@ -1034,7 +1087,7 @@
       } else if (fromChapterSelect) {
         url += '?mode=chapterSelect';
       }
-      window.location.href = url;
+      navigateTo(url);
     }
 
     // === 模态框控制 · P2 统一弹窗管理 ===
@@ -1167,6 +1220,19 @@
 
     // === 初始化事件 ===
     document.addEventListener('DOMContentLoaded', function() {
+      // 页面进入动画（翻书效果）
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const root = document.querySelector('.page-transition-root');
+          if (root) {
+            root.classList.add('page-enter-active');
+            setTimeout(() => {
+              root.classList.remove('page-enter', 'page-enter-active');
+            }, 550);
+          }
+        });
+      });
+
       initContinueButton();
       initSettingsPanel();
       bindSettingsEvents();

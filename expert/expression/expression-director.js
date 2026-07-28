@@ -7,6 +7,7 @@
   const PRIORITY = {
     EUREKA: 100,
     TEACHING: 80,
+    TRIGGER_HINT: 70,       // 自动提示：高于普通 Toast，低于教学和 EUREKA
     STUCK_GUIDE: 50,
     COMBO_EFFECT: 30,
     AMBIENT: 10,
@@ -29,7 +30,19 @@
     enqueue(decision) {
       if (!decision || !decision.action) return;
 
-      const priority = decision.priority || PRIORITY.AMBIENT;
+      // 根据动作类型自动映射优先级（如果未显式指定）
+      let priority = decision.priority;
+      if (priority === undefined || priority === null) {
+        switch (decision.action) {
+          case 'EUREKA': priority = PRIORITY.EUREKA; break;
+          case 'SHOW_DIALOG': priority = PRIORITY.TEACHING; break;
+          case 'TRIGGER_HINT': priority = PRIORITY.TRIGGER_HINT; break;
+          case 'SHOW_TOAST': priority = PRIORITY.STUCK_GUIDE; break;
+          case 'ENCOURAGE': priority = PRIORITY.COMBO_EFFECT; break;
+          case 'ERROR_FEEDBACK': priority = PRIORITY.COMBO_EFFECT; break;
+          default: priority = PRIORITY.AMBIENT; break;
+        }
+      }
 
       // EUREKA clears queue
       if (priority >= PRIORITY.EUREKA) {

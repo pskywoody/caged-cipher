@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Caged Cipher · 笼中密码</title>
+  <link rel="stylesheet" href="assets/css/style.css">
   <style>
     /* ============================================
        启动页 · 侦探案卷夹 · 牛皮封面 · 翻页动画
@@ -626,7 +627,9 @@
   </style>
 </head>
 <body>
-  <div class="book-container" id="book">
+  <!-- 页面转场遮罩 -->
+  <div id="page-transition-overlay" class="page-transition-overlay"></div>
+  <div class="book-container page-transition-root page-enter" id="book">
     <!-- 书的阴影 -->
     <div class="book-shadow"></div>
 
@@ -687,6 +690,18 @@
       const book = document.getElementById('book');
       let isOpening = false;
       let audio = null;
+
+      // 页面进入动画（从其他页面返回时）
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (book) {
+            book.classList.add('page-enter-active');
+            setTimeout(() => {
+              book.classList.remove('page-enter', 'page-enter-active');
+            }, 550);
+          }
+        });
+      });
 
       // 尝试播放翻书音效
       function playFlipSound() {

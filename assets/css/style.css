@@ -283,3 +283,56 @@ body {
     height: calc(100dvh - 32px);
   }
 }
+
+/* ============================================================
+   页面切换过渡动画（卷宗/翻书风格）
+   合书→翻页→开书 的感觉
+   ============================================================ */
+
+/* 页面根容器：用于进入/离开过渡 */
+.page-transition-root {
+  transition: opacity 400ms cubic-bezier(0.4, 0, 0.2, 1),
+              transform 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center center;
+  will-change: opacity, transform;
+}
+
+/* 离开动画：淡出 + 轻微缩放 + 轻微旋转（模拟合书） */
+.page-leave {
+  opacity: 0;
+  transform: scale(0.96) rotateY(-2deg);
+  pointer-events: none;
+}
+
+/* 进入动画初始状态：透明 + 轻微缩放 */
+.page-enter {
+  opacity: 0;
+  transform: scale(0.98);
+}
+
+/* 进入动画结束状态（正常显示） */
+.page-enter-active {
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity 500ms cubic-bezier(0, 0, 0.2, 1),
+              transform 500ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* 转场遮罩层（翻页时的暗角效果） */
+.page-transition-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #0a0806;
+  z-index: var(--z-transition, 30000);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 300ms ease-in-out;
+}
+
+.page-transition-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
