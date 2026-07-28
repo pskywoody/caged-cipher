@@ -629,6 +629,22 @@
       }
       comboSystem = null;
     }
+    // 清理连击UI显示
+    const comboContainer = document.getElementById('combo-ui-container');
+    if (comboContainer) comboContainer.classList.remove('show');
+    const flowIndicator = document.getElementById('flow-state-indicator');
+    if (flowIndicator) {
+      flowIndicator.classList.remove('state-stale', 'state-flow', 'state-eureka');
+      flowIndicator.classList.add('state-cold');
+    }
+    const flowText = document.getElementById('flow-state-text');
+    if (flowText) flowText.textContent = '冷场';
+    const gaugeFill = document.getElementById('combo-gauge-fill');
+    if (gaugeFill) gaugeFill.style.width = '100%';
+    const milestoneOverlay = document.getElementById('milestone-overlay');
+    if (milestoneOverlay) milestoneOverlay.classList.remove('show', 'eureka');
+    const breakOverlay = document.getElementById('combo-break-overlay');
+    if (breakOverlay) breakOverlay.classList.remove('show');
 
     // 清理吐槽系统
     if (comedySystem) {
@@ -2537,6 +2553,292 @@
           comboSystem.update(1000);
         }
       }, 1000);
+
+      // ===== 连击UI控制器 (Combo UI Controller) =====
+      (function initComboUI() {
+        // DOM 引用
+        const comboContainer = document.getElementById('combo-ui-container');
+        const comboNumber = document.getElementById('combo-ui-number');
+        const comboLabel = document.getElementById('combo-ui-label');
+        const gaugeContainer = document.getElementById('combo-gauge-container');
+        const gaugeFill = document.getElementById('combo-gauge-fill');
+        const flowIndicator = document.getElementById('flow-state-indicator');
+        const flowText = document.getElementById('flow-state-text');
+        const milestoneOverlay = document.getElementById('milestone-overlay');
+        const milestoneText = document.getElementById('milestone-text');
+        const milestoneSubtitle = document.getElementById('milestone-subtitle');
+        const milestoneObj = document.getElementById('milestone-objjection');
+        const breakOverlay = document.getElementById('combo-break-overlay');
+        const breakText = document.getElementById('combo-break-text');
+        const breakParticles = document.getElementById('combo-break-particles');
+        const bossPortraitWrap = document.getElementById('boss-portrait-wrap');
+
+        // 心流状态文字映射
+        const FLOW_STATE_LABELS = {
+          cold: '冷场',
+          stale: '预热',
+          flow: '心流',
+          eureka: 'EUREKA'
+        };
+
+        // 里程碑文字映射（逆转裁判风格）
+        const MILESTONE_OBJECTIONS = {
+          'combo_3': '连击！',
+          'combo_5': '手感火热！',
+          'combo_max': 'MAX 惊雷！',
+          'eureka': 'EUREKA！'
+        };
+
+        // 时间条动画状态
+        let gaugeAnimFrame = null;
+        let lastComboTime = 0;
+        let windowMs = comboSystem.comboWindowMs;
+
+        // 时间条动画循环
+        function updateGauge() {
+          if (!comboSystem || comboSystem.count <= 1) {
+            gaugeAnimFrame = null;
+            return;
+          }
+          const elapsed = Date.now() - lastComboTime;
+          const remaining = Math.max(0, windowMs - elapsed);
+          const percent = (remaining / windowMs) * 100;
+          gaugeFill.style.width = percent + '%';
+
+          // 低于 30% 时警告
+          if (percent < 30) {
+            gaugeFill.classList.add('warning');
+          } else {
+            gaugeFill.classList.remove('warning');
+          }
+
+          if (remaining > 0) {
+            gaugeAnimFrame = requestAnimationFrame(updateGauge);
+          } else {
+            gaugeAnimFrame = null;
+          }
+        }
+
+        function startGauge() {
+          lastComboTime = Date.now();
+          if (!gaugeAnimFrame) {
+            gaugeAnimFrame = requestAnimationFrame(updateGauge);
+          }
+        }
+
+        function stopGauge() {
+          if (gaugeAnimFrame) {
+            cancelAnimationFrame(gaugeAnimFrame);
+            gaugeAnimFrame = null;
+          }
+        }
+
+        // 根据连击数计算 tier 等级
+        function getTierClass(count) {
+          if (count >= comboSystem._maxLevel) return 'tier-4';
+          if (count >= comboSystem._eurekaLevel) return 'tier-3';
+          if (count >= 5) return 'tier-2';
+          return 'tier-1';
+        }
+
+        // 更新连击数显示
+        function updateComboDisplay(count) {
+          if (!comboContainer) return;
+
+          if (count <= 1) {
+            comboContainer.classList.remove('show');
+            return;
+          }
+
+          comboContainer.classList.add('show');
+          comboNumber.textContent = count;
+
+          // 更新 tier 颜色
+          comboNumber.classList.remove('tier-1', 'tier-2', 'tier-3', 'tier-4', 'tier-eureka');
+          comboNumber.classList.add(getTierClass(count));
+
+          // 弹跳动画（重启动画）
+          comboNumber.classList.remove('pop');
+          void comboNumber.offsetWidth;
+          comboNumber.classList.add('pop');
+
+          // 更新标签
+          comboLabel.textContent = 'COMBO';
+          comboLabel.style.color = comboNumber.style.color;
+        }
+
+        // 更新心流状态显示
+        function updateFlowState(state) {
+          if (!flowIndicator) return;
+          flowIndicator.classList.remove('state-cold', 'state-stale', 'state-flow', 'state-eureka');
+          flowIndicator.classList.add('state-' + state);
+          if (flowText) {
+            flowText.textContent = FLOW_STATE_LABELS[state] || state;
+          }
+        }
+
+        // 显示里程碑特效
+        function showMilestone(level, milestone) {
+          if (!milestoneOverlay) return;
+
+          const isEureka = milestone.key === 'eureka';
+
+          milestoneText.textContent = level;
+          milestoneSubtitle.textContent = milestone.label;
+          milestoneObj.textContent = MILESTONE_OBJECTIONS[milestone.key] || milestone.label;
+
+          // 重置动画
+          milestoneOverlay.classList.remove('show', 'eureka');
+          void milestoneOverlay.offsetWidth;
+
+          if (isEureka) {
+            milestoneOverlay.classList.add('eureka');
+          }
+          milestoneOverlay.classList.add('show');
+
+          // 更新连击数字为 EUREKA 样式
+          if (isEureka && comboNumber) {
+            comboNumber.classList.remove('tier-1', 'tier-2', 'tier-3', 'tier-4');
+            comboNumber.classList.add('tier-eureka');
+          }
+
+          // 自动隐藏
+          const duration = isEureka ? 1800 : 1000;
+          setTimeout(() => {
+            milestoneOverlay.classList.remove('show', 'eureka');
+          }, duration);
+        }
+
+        // 显示断连效果
+        function showBreak(reason, oldCount) {
+          if (!breakOverlay || oldCount < 3) return; // 低连击不断连特效
+
+          // 断连文字
+          const breakLabels = {
+            'wrong': '失误！',
+            'timeout': '超时！',
+            'erase': '擦除！'
+          };
+          breakText.textContent = breakLabels[reason] || '断连！';
+
+          // 生成破碎粒子
+          if (breakParticles) {
+            breakParticles.innerHTML = '';
+            const particleCount = Math.min(12, Math.floor(oldCount / 2) + 4);
+            for (let i = 0; i < particleCount; i++) {
+              const p = document.createElement('div');
+              p.className = 'break-particle';
+              const angle = (Math.PI * 2 * i) / particleCount + Math.random() * 0.5;
+              const dist = 60 + Math.random() * 80;
+              p.style.setProperty('--px', Math.cos(angle) * dist + 'px');
+              p.style.setProperty('--py', Math.sin(angle) * dist + 'px');
+              p.style.animationDelay = (Math.random() * 0.1) + 's';
+              breakParticles.appendChild(p);
+            }
+          }
+
+          // 时间条破碎动画
+          if (gaugeContainer) {
+            gaugeContainer.classList.add('break');
+            setTimeout(() => {
+              gaugeContainer.classList.remove('break');
+              gaugeFill.style.width = '0%';
+            }, 500);
+          }
+
+          // 重置并播放
+          breakOverlay.classList.remove('show');
+          void breakOverlay.offsetWidth;
+          breakOverlay.classList.add('show');
+
+          setTimeout(() => {
+            breakOverlay.classList.remove('show');
+          }, 800);
+
+          // 停止时间条动画
+          stopGauge();
+        }
+
+        // Boss战震慑效果
+        function triggerBossIntimidation(comboCount) {
+          if (!bossPortraitWrap) return;
+          // 只在 Boss 战激活时触发
+          if (typeof GuideBattle === 'undefined' || !GuideBattle.active) return;
+          // 达到一定连击数才触发
+          if (comboCount < 5) return;
+
+          bossPortraitWrap.classList.remove('shake');
+          void bossPortraitWrap.offsetWidth;
+          bossPortraitWrap.classList.add('shake');
+
+          setTimeout(() => {
+            bossPortraitWrap.classList.remove('shake');
+          }, 800);
+        }
+
+        // ===== 注册回调 =====
+
+        // 保存原始回调（链式调用）
+        const origOnComboChange = comboSystem.onComboChange;
+        comboSystem.onComboChange = function(count) {
+          // 调用原始回调
+          if (origOnComboChange) {
+            try { origOnComboChange(count); } catch(e) {}
+          }
+          // UI 更新
+          updateComboDisplay(count);
+          if (count > 1) {
+            startGauge();
+            // Boss 震慑
+            triggerBossIntimidation(count);
+          }
+        };
+
+        const origOnMilestone = comboSystem.onMilestone;
+        comboSystem.onMilestone = function(level, milestone) {
+          if (origOnMilestone) {
+            try { origOnMilestone(level, milestone); } catch(e) {}
+          }
+          showMilestone(level, milestone);
+        };
+
+        const origOnEureka = comboSystem.onEureka;
+        comboSystem.onEureka = function(type) {
+          if (origOnEureka) {
+            try { origOnEureka(type); } catch(e) {}
+          }
+          // 灵感型 EUREKA 也显示里程碑特效
+          if (type === 'insight') {
+            showMilestone('灵感', { key: 'eureka', label: '灵感迸发！' });
+          }
+        };
+
+        const origOnFlowStateChange = comboSystem.onFlowStateChange;
+        comboSystem.onFlowStateChange = function(state, depth) {
+          if (origOnFlowStateChange) {
+            try { origOnFlowStateChange(state, depth); } catch(e) {}
+          }
+          updateFlowState(state);
+        };
+
+        // onBreak 回调（之前可能未设置）
+        const origOnBreak = comboSystem.onBreak;
+        comboSystem.onBreak = function(reason, oldCount) {
+          if (origOnBreak) {
+            try { origOnBreak(reason, oldCount); } catch(e) {}
+          }
+          showBreak(reason, oldCount);
+        };
+
+        // 暴露到全局便于调试
+        global.comboUI = {
+          updateComboDisplay,
+          updateFlowState,
+          showMilestone,
+          showBreak,
+          triggerBossIntimidation
+        };
+      })();
     }
 
     // Initialize Comedy System (吐槽系统)
@@ -4362,7 +4664,7 @@
     badge.style.cssText = 'position:fixed;top:30%;left:50%;transform:translate(-50%,-50%) scale(0.8);' +
       'background:linear-gradient(135deg,rgba(251,191,36,0.2),rgba(15,23,42,0.95));' +
       'border:2px solid rgba(251,191,36,0.6);border-radius:16px;' +
-      'padding:20px 40px;z-index:9998;text-align:center;' +
+      'padding:20px 40px;z-index:9998;text-align:center;' +  // 低于 overlay 层级
       'opacity:0;transition:all 0.5s cubic-bezier(0.4,0,0.2,1);' +
       'pointer-events:none;backdrop-filter:blur(4px);';
     badge.innerHTML =
@@ -4977,6 +5279,9 @@
     const avatarEl = document.getElementById('hint-narration-avatar');
     const stepEl = document.getElementById('hint-narration-step');
 
+    // 重置文字内容（避免闪现旧内容）
+    if (textEl) textEl.textContent = '';
+
     // 设置头像
     if (avatarEl && options.avatar) {
       avatarEl.textContent = options.avatar;
@@ -5005,14 +5310,19 @@
     // 强制重排后添加 show 类触发动画
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-      bubble.classList.add('show');
+        bubble.classList.add('show');
       });
     });
     NarrationState.visible = true;
 
-    // 设置文字（带打字机效果）
+    // 设置文字（带打字机效果）—— 等淡入动画完成后再开始打字
     if (textEl && options.text) {
-      _startTypewriter(options.text, textEl, options.speed);
+      // 250ms 是 CSS 中淡入动画的时长
+      setTimeout(() => {
+        if (NarrationState.visible) {
+          _startTypewriter(options.text, textEl, options.speed);
+        }
+      }, 250);
     } else if (textEl) {
       textEl.textContent = options.text || '';
     }
@@ -5052,10 +5362,20 @@
     bubble.classList.remove('show');
     NarrationState.visible = false;
 
-    // 延迟隐藏（等动画结束）
+    // 延迟隐藏（等动画结束），并重置内部状态
     setTimeout(() => {
       if (!NarrationState.visible) {
         bubble.style.display = 'none';
+        // 重置内部状态，避免下次显示闪现旧内容
+        const textEl = document.getElementById('hint-narration-text');
+        const stepEl = document.getElementById('hint-narration-step');
+        const techEl = document.getElementById('hint-narration-tech');
+        if (textEl) textEl.textContent = '';
+        if (stepEl) stepEl.style.display = 'none';
+        if (techEl) techEl.style.display = 'none';
+        NarrationState.typewriterFull = '';
+        NarrationState.typewriterIndex = 0;
+        NarrationState.typewriterText = '';
       }
     }, 300);
   }
@@ -6025,20 +6345,18 @@
     _updateFloatBarTabIcon();
     _updateFloatBarBadge();
 
-    // 更新按钮状态
+    // 更新按钮状态 —— 使用 active 类而非内联样式
     const btn = document.getElementById('btn-whatif');
     if (btn) {
-      btn.style.color = '#60a5fa';
-      btn.style.background = 'rgba(96, 165, 250, 0.15)';
+      btn.classList.add('active');
     }
     // 同步 PC 端按钮
     const pcWhatIfBtn = document.getElementById('pc-btn-whatif');
     if (pcWhatIfBtn) {
-      pcWhatIfBtn.style.color = '#60a5fa';
-      pcWhatIfBtn.style.background = 'rgba(96, 165, 250, 0.15)';
+      pcWhatIfBtn.classList.add('active');
     }
 
-    // 更新提示按钮（禁用）
+    // 更新提示按钮（禁用）—— 移动端用内联样式，PC端通过CSS .whatif-mode 控制
     const hintBtn = document.getElementById('btn-hint');
     if (hintBtn) {
       hintBtn.style.opacity = '0.4';
@@ -6097,17 +6415,15 @@
     hideFloatBar();
     if (stack) stack.style.display = 'none';
 
-    // 恢复按钮状态
+    // 恢复按钮状态 —— 使用 active 类而非内联样式
     const btn = document.getElementById('btn-whatif');
     if (btn) {
-      btn.style.color = '';
-      btn.style.background = '';
+      btn.classList.remove('active');
     }
     // 同步 PC 端按钮
     const pcWhatIfBtn = document.getElementById('pc-btn-whatif');
     if (pcWhatIfBtn) {
-      pcWhatIfBtn.style.color = '';
-      pcWhatIfBtn.style.background = '';
+      pcWhatIfBtn.classList.remove('active');
     }
 
     // 恢复提示按钮
@@ -9957,6 +10273,7 @@
     const speakerName = options.speakerName || '';
     const duration = options.duration || 3000;
     const type = options.type || 'info'; // info, hint, eureka, encourage, error
+    const onClick = options.onClick || null;
 
     // Remove existing bubble
     if (_characterBubbleEl) {
@@ -9975,98 +10292,57 @@
     bubble.className = 'char-bubble char-bubble-' + type;
     _characterBubbleEl = bubble;
 
-    // Type-specific styles
-    const typeStyles = {
-      hint: {
-        borderColor: 'rgba(251,191,36,0.5)',
-        bgColor: 'rgba(15,23,42,0.92)',
-        shadowColor: 'rgba(251,191,36,0.2)',
-      },
-      eureka: {
-        borderColor: 'rgba(34,197,94,0.6)',
-        bgColor: 'rgba(15,23,42,0.95)',
-        shadowColor: 'rgba(34,197,94,0.3)',
-      },
-      encourage: {
-        borderColor: 'rgba(147,51,234,0.4)',
-        bgColor: 'rgba(15,23,42,0.9)',
-        shadowColor: 'rgba(147,51,234,0.2)',
-      },
-      error: {
-        borderColor: 'rgba(239,68,68,0.5)',
-        bgColor: 'rgba(15,23,42,0.92)',
-        shadowColor: 'rgba(239,68,68,0.2)',
-      },
-      info: {
-        borderColor: 'rgba(148,163,184,0.3)',
-        bgColor: 'rgba(15,23,42,0.9)',
-        shadowColor: 'rgba(148,163,184,0.1)',
-      },
-    };
-
-    const style = typeStyles[type] || typeStyles.info;
     const emoji = CHAR_EMOJI[characterId] || '💬';
 
-    bubble.style.cssText =
-      'position:fixed;top:70px;right:16px;' +
-      'max-width:280px;min-width:180px;' +
-      'background:' + style.bgColor + ';' +
-      'border:1px solid ' + style.borderColor + ';' +
-      'border-radius:14px;' +
-      'padding:12px 14px 12px 12px;' +
-      'z-index:9500;' +
-      'box-shadow:0 4px 20px ' + style.shadowColor + ';' +
-      'backdrop-filter:blur(8px);' +
-      'opacity:0;' +
-      'transform:translateX(20px);' +
-      'transition:all 0.3s cubic-bezier(0.4,0,0.2,1);' +
-      'cursor:pointer;' +
-      'display:flex;gap:10px;align-items:flex-start;';
-
-    // Build inner HTML with avatar + text
+    // Build inner HTML with avatar + text (using CSS classes instead of inline styles)
     bubble.innerHTML =
-      '<div class="char-bubble-avatar" style="' +
-        'flex-shrink:0;width:36px;height:36px;' +
-        'border-radius:50%;' +
-        'background:linear-gradient(135deg,rgba(251,191,36,0.2),rgba(15,23,42,0.8));' +
-        'border:1px solid ' + style.borderColor + ';' +
-        'display:flex;align-items:center;justify-content:center;' +
-        'font-size:20px;' +
-      '">' + emoji + '</div>' +
-      '<div class="char-bubble-content" style="flex:1;min-width:0;">' +
-        (speakerName ? '<div class="char-bubble-name" style="font-size:11px;color:#fbbf24;font-weight:700;margin-bottom:4px;letter-spacing:1px;">' + speakerName + '</div>' : '') +
-        '<div class="char-bubble-text" style="font-size:13px;color:#e2e8f0;line-height:1.5;word-break:break-word;">' +
+      '<div class="char-bubble-avatar">' + emoji + '</div>' +
+      '<div class="char-bubble-content">' +
+        (speakerName ? '<div class="char-bubble-name">' + speakerName + '</div>' : '') +
+        '<div class="char-bubble-text">' +
           formatBubbleText(text, type) +
         '</div>' +
       '</div>' +
-      '<div class="char-bubble-close" style="flex-shrink:0;font-size:10px;color:#64748b;cursor:pointer;padding:2px 4px;" title="点击关闭">✕</div>';
+      '<div class="char-bubble-close" title="点击关闭">✕</div>';
 
-    // PC 布局下调整气泡位置（放在左侧面板内右上角，更靠近棋盘）
+    // Append to correct container based on layout
+    // PC mode: place inside pc-board-container near top-right of board
+    // Mobile mode: append to body (fixed position)
     if (_isPcLayout) {
-      const leftPanel = document.getElementById('pc-left-panel');
-      if (leftPanel) {
-        leftPanel.appendChild(bubble);
-        bubble.style.position = 'absolute';
-        bubble.style.top = '8px';
-        bubble.style.right = '12px';
-        bubble.style.maxWidth = '340px';
-        bubble.style.zIndex = '500';
+      const boardContainer = document.getElementById('pc-board-container');
+      if (boardContainer) {
+        boardContainer.appendChild(bubble);
+      } else {
+        document.body.appendChild(bubble);
       }
     } else {
       document.body.appendChild(bubble);
     }
 
-    // Animate in
+    // Animate in using classList
     requestAnimationFrame(() => {
-      bubble.style.opacity = '1';
-      bubble.style.transform = 'translateX(0)';
+      requestAnimationFrame(() => {
+        bubble.classList.add('show');
+      });
     });
 
-    // Click to dismiss
-    bubble.addEventListener('click', (e) => {
-      e.stopPropagation();
-      hideCharacterBubble();
-    });
+    // Click to dismiss — only on close button, text area is selectable
+    const closeBtn = bubble.querySelector('.char-bubble-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hideCharacterBubble();
+      });
+    }
+
+    // Optional click handler for the whole bubble
+    if (onClick) {
+      bubble.addEventListener('click', (e) => {
+        // Don't trigger if clicking the close button
+        if (e.target.closest('.char-bubble-close')) return;
+        onClick(e);
+      });
+    }
 
     // Auto-dismiss
     _characterBubbleTimer = setTimeout(() => {
@@ -10080,7 +10356,7 @@
   function formatBubbleText(text, type) {
     // Highlight technique name in 【brackets】
     return text.replace(/【([^】]+)】/g,
-      '<span style="color:#fbbf24;font-weight:700;">【$1】</span>');
+      '<span class="tech-highlight">【$1】</span>');
   }
 
   /**
@@ -10097,8 +10373,7 @@
       _characterBubbleTimer = null;
     }
 
-    bubble.style.opacity = '0';
-    bubble.style.transform = 'translateX(20px)';
+    bubble.classList.remove('show');
     setTimeout(() => {
       if (bubble.parentNode) bubble.remove();
     }, 300);
@@ -10327,20 +10602,65 @@
   }
 
   // === Toast ===
-  function showToast(msg, duration) {
-    const existing = document.querySelector('.game-toast');
-    if (existing) existing.remove();
+  const _toastQueue = [];
+  const _MAX_TOASTS = 2;
 
+  function showToast(msg, duration) {
+    duration = duration || 2500;
+
+    // 检查当前显示的 toast 数量
+    const activeToasts = document.querySelectorAll('.game-toast.show').length;
+
+    if (activeToasts >= _MAX_TOASTS) {
+      // 加入队列，等当前 toast 消失后再显示
+      _toastQueue.push({ msg, duration });
+      return;
+    }
+
+    _createToast(msg, duration);
+  }
+
+  function _createToast(msg, duration) {
     const toast = document.createElement('div');
     toast.className = 'game-toast';
     toast.textContent = msg;
-    document.body.appendChild(toast);
 
-    requestAnimationFrame(() => toast.classList.add('show'));
+    // PC 模式下放在左侧面板，移动端放在 body
+    if (_isPcLayout) {
+      const leftPanel = document.getElementById('pc-left-panel');
+      if (leftPanel) {
+        leftPanel.appendChild(toast);
+      } else {
+        document.body.appendChild(toast);
+      }
+    } else {
+      document.body.appendChild(toast);
+    }
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        toast.classList.add('show');
+      });
+    });
+
     setTimeout(() => {
       toast.classList.remove('show');
-      setTimeout(() => toast.remove(), 300);
-    }, duration || 2500);
+      setTimeout(() => {
+        toast.remove();
+        // 显示队列中的下一个 toast
+        _processToastQueue();
+      }, 300);
+    }, duration);
+  }
+
+  function _processToastQueue() {
+    if (_toastQueue.length === 0) return;
+
+    const activeToasts = document.querySelectorAll('.game-toast.show').length;
+    if (activeToasts < _MAX_TOASTS) {
+      const next = _toastQueue.shift();
+      _createToast(next.msg, next.duration);
+    }
   }
 
   // === 调试工具集（在控制台使用）
@@ -10680,10 +11000,10 @@
 
   /**
    * 检测当前是否应该使用 PC 双栏布局
-   * 规则：宽度 >= 768px 且横屏
+   * 规则：宽度 >= 900px 且横屏
    */
   function _isPcLayoutActive() {
-    return window.innerWidth >= 768 && window.innerWidth > window.innerHeight;
+    return window.innerWidth >= 900 && window.innerWidth > window.innerHeight;
   }
 
   /**
@@ -10696,6 +11016,9 @@
     const canvas = document.getElementById('gameCanvas');
     const longPressHalo = document.getElementById('long-press-halo');
     const hintBubble = document.getElementById('hint-narration-bubble');
+    const comboUIContainer = document.getElementById('combo-ui-container');
+    const threeActIndicator = document.getElementById('three-act-indicator');
+    const climaxOverlay = document.getElementById('climax-overlay');
     const pcBoardContainer = document.getElementById('pc-board-container');
     const mobileBoardArea = document.getElementById('board-area');
 
@@ -10706,6 +11029,22 @@
     // 移动提示气泡到 PC 棋盘容器内
     if (hintBubble) {
       pcBoardContainer.appendChild(hintBubble);
+    }
+    // 移动连击UI到 PC 棋盘容器内
+    if (comboUIContainer) {
+      pcBoardContainer.appendChild(comboUIContainer);
+    }
+    // 移动三幕指示灯到 PC 棋盘容器内
+    if (threeActIndicator) {
+      pcBoardContainer.appendChild(threeActIndicator);
+    }
+    // 移动通关高潮动画到 PC 棋盘容器内（限制在棋盘区域）
+    if (climaxOverlay) {
+      pcBoardContainer.appendChild(climaxOverlay);
+    }
+    // 移动角色气泡到 PC 棋盘容器内（如果正在显示）
+    if (_characterBubbleEl && _characterBubbleEl.parentNode) {
+      pcBoardContainer.appendChild(_characterBubbleEl);
     }
     if (longPressHalo) {
       longPressHalo.style.display = 'none';
@@ -10734,6 +11073,9 @@
     const canvas = document.getElementById('gameCanvas');
     const longPressHalo = document.getElementById('long-press-halo');
     const hintBubble = document.getElementById('hint-narration-bubble');
+    const comboUIContainer = document.getElementById('combo-ui-container');
+    const threeActIndicator = document.getElementById('three-act-indicator');
+    const climaxOverlay = document.getElementById('climax-overlay');
     const pcBoardContainer = document.getElementById('pc-board-container');
     const mobileBoardArea = document.getElementById('board-area');
 
@@ -10749,6 +11091,22 @@
     // 移动提示气泡回移动端棋盘区域
     if (hintBubble) {
       mobileBoardArea.appendChild(hintBubble);
+    }
+    // 移动连击UI回移动端棋盘区域
+    if (comboUIContainer) {
+      mobileBoardArea.appendChild(comboUIContainer);
+    }
+    // 移动三幕指示灯回移动端棋盘区域
+    if (threeActIndicator) {
+      mobileBoardArea.appendChild(threeActIndicator);
+    }
+    // 移动通关高潮动画回 body（全屏）
+    if (climaxOverlay) {
+      document.body.appendChild(climaxOverlay);
+    }
+    // 移动角色气泡回 body（如果正在显示）
+    if (_characterBubbleEl && _characterBubbleEl.parentNode) {
+      document.body.appendChild(_characterBubbleEl);
     }
 
     // 清除标记

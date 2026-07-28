@@ -68,13 +68,33 @@
       this._flowGlowEl = null;          // 棋盘边缘心流光晕
       this._currentFlowState = 'cold';  // cold / stale / flow / eureka
 
+      // 定时器管理
+      this._timers = new Set();
+      this._updateInterval = null;
+
       this._initMilestones();
+    }
+
+    // === 定时器管理 ===
+    _setTimeout(fn, ms) {
+      const id = setTimeout(() => {
+        this._timers.delete(id);
+        fn();
+      }, ms);
+      this._timers.add(id);
+      return id;
+    }
+
+    _clearTimeout(id) {
+      if (id) {
+        clearTimeout(id);
+        this._timers.delete(id);
+      }
     }
 
     // === 根据盘面尺寸和新手状态计算里程碑 ===
     _initMilestones() {
       if (this.isNewPlayer || this.gridSize <= 4) {
-        this._milestones = MILESTONES_NOVICE;
       } else if (this.gridSize === 6) {
         // 6x6：适度降低
         this._milestones = {
@@ -247,6 +267,15 @@
      * 销毁连击系统，移除所有 DOM 元素和定时器
      */
     destroy() {
+      // 清理所有定时器
+      if (this._timers) {
+        this._timers.forEach(id => clearTimeout(id));
+        this._timers.clear();
+      }
+      if (this._updateInterval) {
+        clearInterval(this._updateInterval);
+        this._updateInterval = null;
+      }
       // 移除连击显示元素
       if (this._comboEl && this._comboEl.parentNode) {
         this._comboEl.parentNode.removeChild(this._comboEl);
@@ -541,7 +570,7 @@
 
       // 全屏闪光
       this._eurekaFlashEl.style.opacity = '1';
-      setTimeout(() => {
+      this._setTimeout(() => {
         if (this._eurekaFlashEl) {
           this._eurekaFlashEl.style.opacity = '0';
         }
@@ -562,7 +591,7 @@
       this._ensureFlowGlowEl();
       this._setFlowState('eureka');
       // 1.5 秒后衰减回 flow 状态（如果连击还在）或 cold
-      setTimeout(() => {
+      this._setTimeout(() => {
         if (this.count >= 3) {
           this._setFlowState('flow');
         } else if (this.count >= 1) {
@@ -798,7 +827,7 @@
         this._particlesContainer.appendChild(p);
 
         // 动画结束后移除
-        setTimeout(() => {
+        this._setTimeout(() => {
           if (p.parentNode) p.parentNode.removeChild(p);
         }, 1300);
       }

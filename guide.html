@@ -9,6 +9,19 @@
   <title>Caged Cipher</title>
   <link rel="stylesheet" href="assets/css/style.css">
   <style>
+    :root {
+      --z-board: 1;
+      --z-hud: 100;
+      --z-floating-bar: 200;
+      --z-hint-bubble: 500;
+      --z-char-bubble: 1000;
+      --z-toast: 2000;
+      --z-overlay: 10000;
+      --z-dialog: 15000;
+      --z-climax: 20000;
+      --z-pause: 25000;
+      --z-achievement: 30000;
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { height: 100%; }
     body {
@@ -51,7 +64,7 @@
       height: 100dvh;
       background: transparent;
       position: relative;
-      z-index: 1;
+      z-index: var(--z-board);
       box-sizing: border-box;
       transform: translateY(-10px);
     }
@@ -178,7 +191,7 @@
       background: rgba(26, 21, 18, 0.85);
       border: 1px solid rgba(138, 122, 90, 0.5);
       border-radius: 20px;
-      z-index: 20;
+      z-index: var(--z-hud);
       pointer-events: none;
       backdrop-filter: blur(6px);
       box-shadow:
@@ -337,7 +350,7 @@
         transform: translateX(-50%);
         width: auto;
         max-width: 240px;
-        z-index: 11000;
+        z-index: var(--z-hud);
         margin: 0;
         padding: 3px 10px;
       }
@@ -481,6 +494,15 @@
         0 0 8px rgba(201, 168, 76, 0.3),
         0 2px 4px rgba(0, 0, 0, 0.3);
       opacity: 1;
+    }
+    /* What If 按钮激活状态（蓝色） */
+    #toolbar #btn-whatif.active {
+      color: #60a5fa;
+      background: rgba(96, 165, 250, 0.15);
+      border-color: rgba(96, 165, 250, 0.4);
+      box-shadow:
+        inset 0 1px 0 rgba(96, 165, 250, 0.2),
+        0 0 8px rgba(96, 165, 250, 0.2);
     }
     /* 竖屏隐藏非核心工具栏按钮 */
     #toolbar #btn-chapter,
@@ -720,16 +742,24 @@
       font-size: 14px;
       opacity: 0;
       transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
-      z-index: 10000;
+      z-index: var(--z-toast);
       pointer-events: none;
       border: 1px solid rgba(251,191,36,0.25);
       backdrop-filter: blur(10px);
       max-width: 85vw;
       text-align: center;
+      white-space: nowrap;
     }
     .game-toast.show {
       opacity: 1;
       transform: translateX(-50%) translateY(0);
+    }
+    /* Toast 堆叠：第二个向上偏移 */
+    .game-toast + .game-toast {
+      bottom: 170px;
+    }
+    .game-toast + .game-toast + .game-toast {
+      bottom: 220px;
     }
     /* Multi-select indicator */
     .multi-select-hint {
@@ -915,7 +945,7 @@
       position: fixed;
       right: 0;
       bottom: 80px;
-      z-index: 100;
+      z-index: var(--z-floating-bar);
       pointer-events: none;
       touch-action: none;
       display: flex;
@@ -1410,7 +1440,11 @@
       border-top-color: rgba(239, 68, 68, 0.8);
       border-right-color: rgba(239, 68, 68, 0.4);
       animation: bossPortraitSpin 3s linear infinite;
+      animation-play-state: paused;
       pointer-events: none;
+    }
+    #boss-battle-hud.visible .boss-hud-portrait-ring {
+      animation-play-state: running;
     }
     @keyframes bossPortraitSpin {
       from { transform: rotate(0deg); }
@@ -1425,7 +1459,7 @@
       min-width: 0;
     }
     .boss-hud-title {
-      font-size: 8px;
+      font-size: 10px;
       color: #ef4444;
       letter-spacing: 1.5px;
       font-weight: 700;
@@ -1722,7 +1756,7 @@
       border: 1px solid rgba(251, 191, 36, 0.35);
       border-radius: 12px;
       padding: 10px 14px 10px 12px;
-      z-index: 500;
+      z-index: var(--z-hint-bubble);
       box-shadow: 0 4px 20px rgba(251, 191, 36, 0.15),
                   0 2px 8px rgba(0, 0, 0, 0.4);
       opacity: 0;
@@ -1810,6 +1844,116 @@
       justify-content: center;
       box-shadow: 0 2px 6px rgba(251, 191, 36, 0.4);
     }
+
+    /* ===== 角色气泡（Character Bubble） ===== */
+    .char-bubble {
+      position: fixed;
+      top: 70px;
+      right: 16px;
+      max-width: 280px;
+      min-width: 180px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 14px;
+      padding: 12px 14px 12px 12px;
+      z-index: var(--z-char-bubble);
+      box-shadow: 0 4px 20px rgba(148, 163, 184, 0.1);
+      backdrop-filter: blur(8px);
+      opacity: 0;
+      transform: translateX(20px);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+    .char-bubble.show {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    .char-bubble-avatar {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(15, 23, 42, 0.8));
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+    .char-bubble-content {
+      flex: 1;
+      min-width: 0;
+    }
+    .char-bubble-name {
+      font-size: 11px;
+      color: #fbbf24;
+      font-weight: 700;
+      margin-bottom: 4px;
+      letter-spacing: 1px;
+    }
+    .char-bubble-text {
+      font-size: 13px;
+      color: #e2e8f0;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    .char-bubble-text .tech-highlight {
+      color: #fbbf24;
+      font-weight: 700;
+    }
+    .char-bubble-close {
+      flex-shrink: 0;
+      font-size: 10px;
+      color: #64748b;
+      cursor: pointer;
+      padding: 2px 4px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .char-bubble-close:hover {
+      color: #e2e8f0;
+    }
+    /* Type variants */
+    .char-bubble.char-bubble-hint {
+      border-color: rgba(251, 191, 36, 0.5);
+      background: rgba(15, 23, 42, 0.92);
+      box-shadow: 0 4px 20px rgba(251, 191, 36, 0.2);
+    }
+    .char-bubble.char-bubble-hint .char-bubble-avatar {
+      border-color: rgba(251, 191, 36, 0.5);
+    }
+    .char-bubble.char-bubble-eureka {
+      border-color: rgba(34, 197, 94, 0.6);
+      background: rgba(15, 23, 42, 0.95);
+      box-shadow: 0 4px 20px rgba(34, 197, 94, 0.3);
+    }
+    .char-bubble.char-bubble-eureka .char-bubble-avatar {
+      border-color: rgba(34, 197, 94, 0.6);
+    }
+    .char-bubble.char-bubble-encourage {
+      border-color: rgba(147, 51, 234, 0.4);
+      background: rgba(15, 23, 42, 0.9);
+      box-shadow: 0 4px 20px rgba(147, 51, 234, 0.2);
+    }
+    .char-bubble.char-bubble-encourage .char-bubble-avatar {
+      border-color: rgba(147, 51, 234, 0.4);
+    }
+    .char-bubble.char-bubble-error {
+      border-color: rgba(239, 68, 68, 0.5);
+      background: rgba(15, 23, 42, 0.92);
+      box-shadow: 0 4px 20px rgba(239, 68, 68, 0.2);
+    }
+    .char-bubble.char-bubble-error .char-bubble-avatar {
+      border-color: rgba(239, 68, 68, 0.5);
+    }
+    .char-bubble.char-bubble-info .char-bubble-avatar {
+      border-color: rgba(148, 163, 184, 0.3);
+    }
+
     /* 横屏模式下的解说气泡位置调整 */
     @media (orientation: landscape) and (max-height: 520px) {
       .hint-narration-bubble {
@@ -1818,7 +1962,7 @@
     }
 
     /* PC 双栏模式下的解说气泡 */
-    @media (min-width: 768px) and (orientation: landscape) {
+    @media (min-width: 900px) and (orientation: landscape) {
       #pc-left-panel .hint-narration-bubble {
         top: -12px;
         min-width: 280px;
@@ -1841,8 +1985,8 @@
       display: none;
     }
 
-    /* 双栏模式：宽度 ≥ 768px 且横屏 */
-    @media (min-width: 768px) and (orientation: landscape) {
+    /* 双栏模式：宽度 ≥ 900px 且横屏 */
+    @media (min-width: 900px) and (orientation: landscape) {
       /* 隐藏移动端布局 */
       #game-container {
         display: none !important;
@@ -1914,6 +2058,30 @@
       }
       #pc-board-container .climax-shard {
         background: rgba(200, 210, 230, 0.5);
+      }
+
+      /* PC 模式下角色气泡：棋盘容器内右上角 */
+      #pc-board-container .char-bubble {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        max-width: 340px;
+        z-index: var(--z-char-bubble);
+        font-size: 15px;
+      }
+      #pc-board-container .char-bubble .char-bubble-text {
+        font-size: 15px;
+      }
+
+      /* PC 模式下三幕指示灯 */
+      #pc-board-container .three-act-indicator {
+        top: 8px;
+        z-index: var(--z-hud);
+      }
+
+      /* PC 模式下提示气泡字体 */
+      #pc-board-container .hint-narration-bubble .hint-narration-text {
+        font-size: 15px;
       }
 
       /* PC 端控制区 */
@@ -2521,6 +2689,61 @@
       #pc-right-panel::-webkit-scrollbar-thumb:hover {
         background: rgba(138, 122, 90, 0.7);
       }
+
+      /* 右侧功能舱滚动渐变遮罩 */
+      #pc-right-panel::before {
+        content: '';
+        position: sticky;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 20px;
+        background: linear-gradient(to bottom, #3d322a, transparent);
+        z-index: 10;
+        pointer-events: none;
+        flex-shrink: 0;
+        margin: 0 -14px;
+      }
+      #pc-right-panel::after {
+        content: '';
+        position: sticky;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 20px;
+        background: linear-gradient(to top, #3d322a, transparent);
+        z-index: 10;
+        pointer-events: none;
+        flex-shrink: 0;
+        margin: 0 -14px;
+      }
+
+      /* PC 模式下 toast 位置：左侧面板底部居中 */
+      .pc-layout-active .game-toast {
+        position: absolute;
+        bottom: 120px;
+        left: 50%;
+        transform: translateX(-50%) translateY(20px);
+      }
+      .pc-layout-active .game-toast.show {
+        transform: translateX(-50%) translateY(0);
+      }
+      #pc-left-panel {
+        position: relative;
+      }
+
+      /* What If 按钮激活状态 */
+      #pc-btn-whatif.active {
+        color: #60a5fa;
+        background: rgba(96, 165, 250, 0.15);
+        border-color: rgba(96, 165, 250, 0.4);
+      }
+
+      /* What If 模式下 hint 按钮禁用样式 */
+      .whatif-mode #pc-btn-hint {
+        opacity: 0.4;
+        pointer-events: none;
+      }
     }
 
     /* ======== 微交互动画增强 ======== */
@@ -2605,7 +2828,7 @@
       }
 
       /* PC 双栏布局下按钮悬停上浮 */
-      @media (min-width: 768px) and (orientation: landscape) {
+      @media (min-width: 900px) and (orientation: landscape) {
         #pc-toolbar button:hover {
           transform: translateY(-2px);
           box-shadow:
@@ -2648,7 +2871,7 @@
     }
 
     /* PC 端快照滑入 */
-    @media (min-width: 768px) and (orientation: landscape) {
+    @media (min-width: 900px) and (orientation: landscape) {
       .pc-snapshot-card.new-snapshot {
         animation: pcSnapshotSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
       }
@@ -2787,7 +3010,7 @@
     }
 
     /* PC 端数字键完成状态 */
-    @media (min-width: 768px) and (orientation: landscape) {
+    @media (min-width: 900px) and (orientation: landscape) {
       #pc-num-pad .num-btn.completed {
         opacity: 0.3;
         filter: grayscale(0.7) brightness(0.75);
@@ -2975,6 +3198,477 @@
       }
     }
 
+    /* ============================================
+       ===== 连击系统 UI 增强 (Combo System UI) ====
+       ============================================ */
+
+    /* --- 1. 连击计数器容器 (替代 combo-system.js 内部简陋版本) --- */
+    #combo-ui-container {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 30;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      opacity: 0;
+      transform: translateY(-8px) scale(0.9);
+      transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+                  transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    #combo-ui-container.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    /* 连击数字 */
+    .combo-ui-number {
+      font-size: 42px;
+      font-weight: 900;
+      font-family: 'Impact', 'Arial Black', 'Helvetica Neue', sans-serif;
+      letter-spacing: 1px;
+      line-height: 1;
+      color: #fbbf24;
+      text-shadow:
+        0 2px 4px rgba(0,0,0,0.5),
+        0 0 12px rgba(251, 191, 36, 0.5),
+        0 0 24px rgba(251, 191, 36, 0.25);
+      -webkit-text-stroke: 1px rgba(0,0,0,0.3);
+      transition: color 0.2s ease, text-shadow 0.2s ease, font-size 0.2s ease;
+    }
+    /* 等级颜色 */
+    .combo-ui-number.tier-1 { color: #fbbf24; text-shadow: 0 2px 4px rgba(0,0,0,0.5), 0 0 12px rgba(251, 191, 36, 0.5); }
+    .combo-ui-number.tier-2 { color: #60a5fa; text-shadow: 0 2px 4px rgba(0,0,0,0.5), 0 0 12px rgba(96, 165, 250, 0.6), 0 0 24px rgba(96, 165, 250, 0.3); }
+    .combo-ui-number.tier-3 { color: #a78bfa; text-shadow: 0 2px 4px rgba(0,0,0,0.5), 0 0 14px rgba(167, 139, 250, 0.7), 0 0 28px rgba(167, 139, 250, 0.4); }
+    .combo-ui-number.tier-4 { color: #f87171; text-shadow: 0 2px 4px rgba(0,0,0,0.5), 0 0 16px rgba(248, 113, 113, 0.8), 0 0 32px rgba(248, 113, 113, 0.5); font-size: 48px; }
+    .combo-ui-number.tier-eureka {
+      background: linear-gradient(135deg, #fbbf24, #f472b6, #a78bfa, #60a5fa, #34d399, #fbbf24);
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: eurekaRainbow 2s ease-in-out infinite;
+      filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.6));
+      font-size: 52px;
+    }
+    @keyframes eurekaRainbow {
+      0%   { background-position: 0% 50%; }
+      50%  { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    /* 连击数字弹跳动画 */
+    .combo-ui-number.pop {
+      animation: comboNumberPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes comboNumberPop {
+      0%   { transform: scale(1); filter: brightness(1); }
+      40%  { transform: scale(1.35); filter: brightness(1.6) saturate(1.4); }
+      70%  { transform: scale(0.92); filter: brightness(1.2); }
+      100% { transform: scale(1); filter: brightness(1); }
+    }
+
+    /* 连击标签 */
+    .combo-ui-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #d4a84b;
+      opacity: 0.85;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      transition: color 0.2s ease;
+    }
+
+    /* --- 2. 连击时间条 (Combo Gauge) --- */
+    .combo-gauge-container {
+      width: 120px;
+      height: 6px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(251, 191, 36, 0.3);
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+      backdrop-filter: blur(4px);
+    }
+    .combo-gauge-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #fbbf24, #f59e0b);
+      border-radius: 2px;
+      transition: width 0.08s linear;
+      box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+    }
+    .combo-gauge-fill.warning {
+      background: linear-gradient(90deg, #ef4444, #dc2626);
+      animation: gaugeWarningPulse 0.3s ease-in-out infinite alternate;
+    }
+    @keyframes gaugeWarningPulse {
+      from { box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
+      to   { box-shadow: 0 0 12px rgba(239, 68, 68, 0.8); }
+    }
+    /* 时间条破碎动画 */
+    .combo-gauge-container.break {
+      animation: gaugeBreak 0.5s ease-out forwards;
+    }
+    @keyframes gaugeBreak {
+      0%   { transform: scaleX(1); opacity: 1; }
+      30%  { transform: scaleX(1.1); opacity: 1; background: rgba(239, 68, 68, 0.3); }
+      100% { transform: scaleX(0); opacity: 0; }
+    }
+
+    /* --- 3. 心流状态指示器 (Flow State Indicator) --- */
+    .flow-state-indicator {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      background: rgba(26, 21, 18, 0.7);
+      border: 1px solid rgba(138, 122, 90, 0.3);
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748b;
+      backdrop-filter: blur(6px);
+      transition: all 0.4s ease;
+      opacity: 0.7;
+    }
+    .flow-state-indicator.state-cold {
+      color: #64748b;
+      border-color: rgba(100, 116, 139, 0.3);
+    }
+    .flow-state-indicator.state-stale {
+      color: #94a3b8;
+      border-color: rgba(148, 163, 184, 0.4);
+      opacity: 0.85;
+    }
+    .flow-state-indicator.state-flow {
+      color: #60a5fa;
+      border-color: rgba(96, 165, 250, 0.5);
+      box-shadow: 0 0 8px rgba(96, 165, 250, 0.2);
+      opacity: 1;
+    }
+    .flow-state-indicator.state-eureka {
+      color: #fbbf24;
+      border-color: rgba(251, 191, 36, 0.6);
+      box-shadow: 0 0 12px rgba(251, 191, 36, 0.4);
+      opacity: 1;
+      animation: flowEurekaGlow 1s ease-in-out infinite alternate;
+    }
+    @keyframes flowEurekaGlow {
+      from { box-shadow: 0 0 6px rgba(251, 191, 36, 0.3); }
+      to   { box-shadow: 0 0 16px rgba(251, 191, 36, 0.6); }
+    }
+    .flow-state-icon {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      transition: all 0.3s ease;
+    }
+    .flow-state-indicator.state-flow .flow-state-icon {
+      animation: flowDotPulse 2s ease-in-out infinite;
+    }
+    @keyframes flowDotPulse {
+      0%, 100% { box-shadow: 0 0 2px currentColor; }
+      50%      { box-shadow: 0 0 8px currentColor; transform: scale(1.2); }
+    }
+    .flow-state-text {
+      letter-spacing: 0.5px;
+    }
+
+    /* --- 4. 里程碑达成特效 (Milestone Banner) --- */
+    #milestone-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 9000;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      visibility: hidden;
+    }
+    #milestone-overlay.show {
+      opacity: 1;
+      visibility: visible;
+    }
+    .milestone-flash {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at center, rgba(251, 191, 36, 0.35) 0%, rgba(251, 191, 36, 0) 65%);
+      opacity: 0;
+    }
+    #milestone-overlay.show .milestone-flash {
+      animation: milestoneFlash 0.6s ease-out;
+    }
+    @keyframes milestoneFlash {
+      0%   { opacity: 0; }
+      20%  { opacity: 1; }
+      100% { opacity: 0; }
+    }
+    .milestone-text {
+      position: relative;
+      z-index: 2;
+      font-size: 64px;
+      font-weight: 900;
+      font-family: 'Impact', 'Arial Black', sans-serif;
+      letter-spacing: 4px;
+      color: #fbbf24;
+      text-shadow:
+        0 0 20px rgba(251, 191, 36, 0.8),
+        0 0 40px rgba(251, 191, 36, 0.5),
+        0 4px 8px rgba(0, 0, 0, 0.5);
+      -webkit-text-stroke: 2px rgba(0, 0, 0, 0.3);
+      transform: scale(0.5) rotate(-10deg);
+      opacity: 0;
+    }
+    #milestone-overlay.show .milestone-text {
+      animation: milestoneTextIn 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    @keyframes milestoneTextIn {
+      0%   { transform: scale(0.3) rotate(-15deg); opacity: 0; }
+      50%  { transform: scale(1.2) rotate(3deg); opacity: 1; }
+      70%  { transform: scale(0.95) rotate(-1deg); }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+    .milestone-subtitle {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 6px;
+      color: #fef3c7;
+      margin-top: 8px;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    #milestone-overlay.show .milestone-subtitle {
+      animation: milestoneSubtitleIn 0.6s ease-out 0.3s forwards;
+    }
+    @keyframes milestoneSubtitleIn {
+      to { opacity: 0.9; transform: translateY(0); }
+    }
+
+    /* EUREKA 里程碑特殊样式 */
+    #milestone-overlay.eureka .milestone-text {
+      font-size: 72px;
+      background: linear-gradient(135deg, #fbbf24, #f472b6, #a78bfa, #60a5fa, #fbbf24);
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: eurekaTextIn 1s cubic-bezier(0.22, 1, 0.36, 1) forwards, eurekaRainbow 2s ease-in-out infinite 0.8s;
+      filter: drop-shadow(0 0 20px rgba(251, 191, 36, 0.6));
+    }
+    @keyframes eurekaTextIn {
+      0%   { transform: scale(0.2) rotate(-25deg) translateY(50px); opacity: 0; }
+      40%  { transform: scale(1.3) rotate(5deg) translateY(-10px); opacity: 1; }
+      65%  { transform: scale(0.9) rotate(-2deg) translateY(5px); }
+      100% { transform: scale(1.1) rotate(0deg) translateY(0); opacity: 1; }
+    }
+    #milestone-overlay.eureka .milestone-flash {
+      animation: eurekaFlash 0.8s ease-out;
+    }
+    @keyframes eurekaFlash {
+      0%   { opacity: 0; background: radial-gradient(circle, rgba(251, 191, 36, 0) 0%, transparent 60%); }
+      15%  { opacity: 1; background: radial-gradient(circle, rgba(251, 191, 36, 0.6) 0%, rgba(251, 191, 36, 0.2) 60%); }
+      100% { opacity: 0; background: radial-gradient(circle, rgba(251, 191, 36, 0.2) 0%, transparent 70%); }
+    }
+
+    /* 逆转裁判风格的"异议!"式文字飞出 */
+    .milestone-objjection {
+      position: absolute;
+      top: 35%;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 80px;
+      font-weight: 900;
+      font-family: 'Impact', 'Arial Black', sans-serif;
+      color: #fbbf24;
+      text-shadow:
+        -3px -3px 0 #78350f,
+        3px -3px 0 #78350f,
+        -3px 3px 0 #78350f,
+        3px 3px 0 #78350f,
+        0 0 30px rgba(251, 191, 36, 0.8);
+      letter-spacing: 2px;
+      opacity: 0;
+      z-index: 3;
+    }
+    #milestone-overlay.eureka .milestone-objjection {
+      animation: objectionFlyIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    @keyframes objectionFlyIn {
+      0%   { transform: translateX(-50%) scale(3); opacity: 0; filter: blur(10px); }
+      60%  { transform: translateX(-50%) scale(0.9); opacity: 1; filter: blur(0); }
+      100% { transform: translateX(-50%) scale(1.1); opacity: 1; filter: blur(0); }
+    }
+
+    /* --- 5. 断连破碎效果 (Combo Break) --- */
+    #combo-break-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 8500;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      visibility: hidden;
+    }
+    #combo-break-overlay.show {
+      opacity: 1;
+      visibility: visible;
+    }
+    .combo-break-text {
+      font-size: 36px;
+      font-weight: 900;
+      font-family: 'Impact', 'Arial Black', sans-serif;
+      color: #ef4444;
+      text-shadow: 0 0 15px rgba(239, 68, 68, 0.6), 0 2px 4px rgba(0, 0, 0, 0.5);
+      letter-spacing: 4px;
+      opacity: 0;
+      transform: scale(1);
+    }
+    #combo-break-overlay.show .combo-break-text {
+      animation: comboBreakShatter 0.8s ease-out forwards;
+    }
+    @keyframes comboBreakShatter {
+      0%   { transform: scale(1); opacity: 1; filter: blur(0); }
+      30%  { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(0.5) translateY(-40px); opacity: 0; filter: blur(8px); }
+    }
+    /* 破碎粒子 */
+    .combo-break-particles {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 200px;
+      height: 200px;
+    }
+    .break-particle {
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      background: #ef4444;
+      border-radius: 2px;
+      top: 50%;
+      left: 50%;
+      opacity: 0;
+    }
+    #combo-break-overlay.show .break-particle {
+      animation: breakParticleFly 0.7s ease-out forwards;
+    }
+    @keyframes breakParticleFly {
+      0%   { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+      100% { transform: translate(calc(-50% + var(--px)), calc(-50% + var(--py))) scale(0); opacity: 0; }
+    }
+
+    /* --- 6. 对战震慑效果 (Intimidation Effect) --- */
+    .boss-intimidate {
+      position: relative;
+    }
+    .boss-intimidate.shake .boss-hud-portrait {
+      animation: bossShake 0.4s ease-in-out;
+    }
+    @keyframes bossShake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
+      20%, 40%, 60%, 80% { transform: translateX(3px); }
+    }
+    /* 震慑汗珠 */
+    .boss-sweat {
+      position: absolute;
+      top: 10%;
+      right: 25%;
+      font-size: 16px;
+      opacity: 0;
+      transform: translateY(-5px);
+    }
+    .boss-intimidate.shake .boss-sweat {
+      animation: sweatDrop 0.8s ease-out;
+    }
+    @keyframes sweatDrop {
+      0%   { opacity: 0; transform: translateY(-5px) scale(0.5); }
+      30%  { opacity: 1; transform: translateY(0) scale(1.2); }
+      60%  { opacity: 1; transform: translateY(8px) scale(1); }
+      100% { opacity: 0; transform: translateY(20px) scale(0.8); }
+    }
+    /* 震慑感叹号 */
+    .boss-intimidate-icon {
+      position: absolute;
+      top: -10px;
+      right: -5px;
+      width: 20px;
+      height: 20px;
+      background: #ef4444;
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 900;
+      opacity: 0;
+      transform: scale(0);
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+    }
+    .boss-intimidate.shake .boss-intimidate-icon {
+      animation: intimidateIcon 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes intimidateIcon {
+      0%   { opacity: 0; transform: scale(0) rotate(-30deg); }
+      50%  { opacity: 1; transform: scale(1.3) rotate(10deg); }
+      100% { opacity: 1; transform: scale(1) rotate(0deg); }
+    }
+
+    /* --- 7. 移动端适配 --- */
+    @media (max-width: 380px) {
+      .combo-ui-number { font-size: 32px; }
+      .combo-ui-number.tier-4 { font-size: 38px; }
+      .combo-ui-number.tier-eureka { font-size: 42px; }
+      .combo-gauge-container { width: 90px; }
+    }
+    @media (max-height: 600px) {
+      #combo-ui-container { top: 4px; right: 4px; }
+      .combo-ui-number { font-size: 28px; }
+      .combo-gauge-container { height: 4px; width: 80px; }
+    }
+
+    /* --- PC 端适配 --- */
+    @media (min-width: 900px) and (orientation: landscape) {
+      #pc-board-container #combo-ui-container {
+        top: 12px;
+        right: 12px;
+      }
+      #pc-board-container .combo-ui-number {
+        font-size: 56px;
+      }
+      #pc-board-container .combo-ui-number.tier-4 { font-size: 64px; }
+      #pc-board-container .combo-ui-number.tier-eureka { font-size: 72px; }
+      #pc-board-container .combo-gauge-container {
+        width: 160px;
+        height: 8px;
+      }
+    }
+
+    /* 隐藏 combo-system.js 内部自带的简陋连击显示，使用增强版UI */
+    #combo-display {
+      display: none !important;
+    }
+
     /* 低动画偏好设置 */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
@@ -3013,9 +3707,11 @@
     <!-- Boss战HUD进度条 -->
     <div id="boss-battle-hud">
       <div class="boss-hud-top-row">
-        <div class="boss-hud-portrait-wrap">
+        <div class="boss-hud-portrait-wrap boss-intimidate" id="boss-portrait-wrap">
           <img class="boss-hud-portrait" id="boss-hud-portrait" src="" alt="">
           <div class="boss-hud-portrait-ring"></div>
+          <div class="boss-sweat">💧</div>
+          <div class="boss-intimidate-icon">!</div>
         </div>
         <div class="boss-hud-center">
           <div class="boss-hud-title">BOSS BATTLE</div>
@@ -3089,6 +3785,18 @@
           <div class="hint-narration-text" id="hint-narration-text"></div>
         </div>
         <div class="hint-narration-step-badge" id="hint-narration-step" style="display:none;">1</div>
+      </div>
+      <!-- 连击系统UI容器 (Combo System UI) -->
+      <div id="combo-ui-container">
+        <div class="flow-state-indicator state-cold" id="flow-state-indicator">
+          <span class="flow-state-icon"></span>
+          <span class="flow-state-text" id="flow-state-text">冷场</span>
+        </div>
+        <div class="combo-ui-number tier-1" id="combo-ui-number">0</div>
+        <div class="combo-ui-label" id="combo-ui-label">COMBO</div>
+        <div class="combo-gauge-container" id="combo-gauge-container">
+          <div class="combo-gauge-fill" id="combo-gauge-fill"></div>
+        </div>
       </div>
       <canvas id="gameCanvas"></canvas>
       <div id="long-press-halo" class="long-press-halo"></div>
@@ -3167,7 +3875,23 @@
     </div>
   </div>
 
-  <!-- PC 双栏工作区（宽度 ≥ 768px 且横屏时显示） -->
+  <!-- 连击里程碑特效层 (Milestone Overlay) -->
+  <div id="milestone-overlay">
+    <div class="milestone-flash"></div>
+    <div class="milestone-objjection" id="milestone-objjection"></div>
+    <div style="text-align:center; position:relative; z-index:2;">
+      <div class="milestone-text" id="milestone-text">0</div>
+      <div class="milestone-subtitle" id="milestone-subtitle">COMBO</div>
+    </div>
+  </div>
+
+  <!-- 连击断连特效层 (Combo Break Overlay) -->
+  <div id="combo-break-overlay">
+    <div class="combo-break-particles" id="combo-break-particles"></div>
+    <div class="combo-break-text" id="combo-break-text">断连</div>
+  </div>
+
+  <!-- PC 双栏工作区（宽度 ≥ 900px 且横屏时显示） -->
   <div id="pc-workspace">
     <!-- 左侧战区：棋盘 + 数字键盘 + 工具栏 -->
     <div id="pc-left-panel">
@@ -3270,7 +3994,7 @@
   </div>
 
   <!-- Pause Menu Overlay -->
-  <div id="pause-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(20,16,12,0.82);z-index:22000;display:none;flex-direction:column;align-items:center;justify-content:center;backdrop-filter:blur(8px);opacity:0;">
+  <div id="pause-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(20,16,12,0.82);z-index:var(--z-pause);display:none;flex-direction:column;align-items:center;justify-content:center;backdrop-filter:blur(8px);opacity:0;">
     <div style="text-align:center;padding:32px 28px;background:linear-gradient(180deg,#3d322a 0%,#2a211c 100%);border:1px solid rgba(201,168,76,0.25);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.04);min-width:280px;max-width:90vw;position:relative;">
       <div style="position:absolute;inset:8px;border:1px solid rgba(201,168,76,0.08);border-radius:8px;pointer-events:none;"></div>
       <div style="font-size:20px;font-weight:700;color:#c9a84c;margin-bottom:4px;letter-spacing:4px;position:relative;z-index:1;">案件搁置</div>
@@ -3287,7 +4011,7 @@
   </div>
 
   <!-- 通关高潮动画：破案印章 -->
-  <div id="climax-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:25000;pointer-events:none;overflow:hidden;">
+  <div id="climax-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:var(--z-climax);pointer-events:none;overflow:hidden;">
     <!-- 毛玻璃层 -->
     <div id="climax-frosted" class="climax-frosted" style="position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(20,15,10,0.3);backdrop-filter:blur(0px);-webkit-backdrop-filter:blur(0px);opacity:0;"></div>
     <!-- 大印章 -->
@@ -3327,7 +4051,7 @@
   </div>
 
   <!-- Completion Overlay -->
-  <div id="complete-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:20000;display:none;flex-direction:column;align-items:center;justify-content:center;">
+  <div id="complete-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:var(--z-dialog);display:none;flex-direction:column;align-items:center;justify-content:center;">
     <div style="text-align:center;padding:40px;">
       <div style="font-size:64px;margin-bottom:20px;">🏆</div>
       <h2 style="font-size:32px;color:#fbbf24;margin-bottom:16px;">关卡完成</h2>
@@ -3341,7 +4065,7 @@
   </div>
 
   <!-- Battle Result Overlay -->
-  <div id="battle-result-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:20001;display:none;flex-direction:column;align-items:center;justify-content:center;opacity:0;transition:opacity 200ms ease;">
+  <div id="battle-result-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:calc(var(--z-dialog) + 1);display:none;flex-direction:column;align-items:center;justify-content:center;opacity:0;transition:opacity 200ms ease;">
     <div id="battle-result-card" style="width:90%;max-width:420px;background:rgba(15,23,42,0.95);border-radius:16px;padding:32px 24px;text-align:center;border:1px solid rgba(255,255,255,0.1);box-shadow:0 20px 60px rgba(0,0,0,0.5);">
       <div id="battle-result-icon" style="font-size:56px;margin-bottom:12px;">🏆</div>
       <h2 id="battle-result-title" style="font-size:32px;font-weight:900;margin-bottom:8px;letter-spacing:2px;">胜利</h2>
@@ -3416,7 +4140,7 @@
   </div>
 
   <!-- Chapter Transition Overlay -->
-  <div id="chapter-transition" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#000;z-index:21000;flex-direction:column;align-items:center;justify-content:center;opacity:0;">
+  <div id="chapter-transition" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#000;z-index:calc(var(--z-dialog) + 1000);flex-direction:column;align-items:center;justify-content:center;opacity:0;">
     <div style="text-align:center;">
       <div style="font-size:14px;color:#64748b;letter-spacing:8px;margin-bottom:20px;">下一章</div>
       <div id="ct-title" style="font-size:42px;font-weight:900;color:#fbbf24;letter-spacing:6px;text-shadow:0 0 30px rgba(251,191,36,0.5);"></div>
@@ -3425,7 +4149,7 @@
   </div>
 
   <!-- Game Ending Overlay -->
-  <div id="game-ending" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,#1e1b4b 0%,#000 100%);z-index:21000;flex-direction:column;align-items:center;justify-content:center;opacity:0;">
+  <div id="game-ending" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,#1e1b4b 0%,#000 100%);z-index:calc(var(--z-dialog) + 1000);flex-direction:column;align-items:center;justify-content:center;opacity:0;">
     <div style="text-align:center;padding:40px;">
       <div style="font-size:18px;color:#64748b;letter-spacing:12px;margin-bottom:30px;">— 全剧终 —</div>
       <div style="font-size:56px;font-weight:900;color:#fbbf24;letter-spacing:8px;text-shadow:0 0 40px rgba(251,191,36,0.4);margin-bottom:30px;">CAGED CIPHER</div>
@@ -3439,7 +4163,7 @@
   </div>
 
   <!-- True Ending Overlay -->
-  <div id="true-ending" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,rgba(251,191,36,0.15) 0%,#0c0a1f 40%,#000 100%);z-index:21500;flex-direction:column;align-items:center;justify-content:center;opacity:0;">
+  <div id="true-ending" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,rgba(251,191,36,0.15) 0%,#0c0a1f 40%,#000 100%);z-index:calc(var(--z-dialog) + 1500);flex-direction:column;align-items:center;justify-content:center;opacity:0;">
     <div style="text-align:center;padding:40px;max-width:600px;">
       <div style="font-size:14px;color:#fbbf24;letter-spacing:12px;margin-bottom:20px;opacity:0.8;">TRUE ENDING</div>
       <div style="font-size:16px;color:#fbbf24;letter-spacing:8px;margin-bottom:30px;opacity:0.8;">— 真结局 —</div>
