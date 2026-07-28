@@ -254,7 +254,7 @@
       playHintAnimation, showFloatBar, hideFloatBar, _updateFloatBarTabIcon,
       showAutoHint, _normalizeEvidence, restartLevel, _showCompleteOverlay,
       goToChapterSelect, unlockBackground, _reinitBoardForBattle,
-      _cleanupLevelState, _startLessonPlayer, loadLevel, initBoard,
+      _cleanupLevelState, _startLessonPlayer, loadLevel, initBoard, startLevel,
       calculateGrade, checkAchievements, updateNextLevelButton,
     };
     // 让 ctx 可以访问到自身的属性（用于 getter 闭包）

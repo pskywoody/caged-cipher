@@ -200,7 +200,7 @@
             getHintPlayerState: () => ctx.HintPlayerState,
             log: log,
           });
-          ctx.registerExpertCharacterHandlers();
+          ExpertCharacterHandler.registerExpertCharacterHandlers();
         }
       } catch (e) {
         console.warn('[FALLBACK] ExpertCharacterHandler 初始化失败，跳过', e);
