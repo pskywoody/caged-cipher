@@ -16,6 +16,10 @@
   const LessonUICoordinator = window.LessonUICoordinator;
   const AchievementCoordinator = window.AchievementCoordinator;
   const StoryOrchestrator = window.StoryOrchestrator;
+  const WinConditionManager = window.WinConditionManager;
+  const AutoHintSystem = window.AutoHintSystem;
+  const DebugTools = window.DebugTools;
+  const PcLayoutManager = window.PcLayoutManager;
 
   // === 第四阶段抽离：GameController 和 WhatIfManager 实例 ===
   let gameController = null;
@@ -60,7 +64,6 @@
   let expertSystem = null;
   let comboSystem = null;
   let comedySystem = null;  // 吐槽系统
-  let _autoHintMuteUntil = 0; // 自动提示临时静音截止时间
   let storyEngine = null;
   let currentLevelData = null;
   let currentChapterData = null;
@@ -70,6 +73,9 @@
   let noteMode = false;
   let hintSystem = null;
   let hintCount = 0;
+
+  // === 第八阶段抽离：自动提示系统 ===
+  let autoHintSystem = null;
 
   // === 第七阶段抽离：教学引导 UI 协调器 ===
   let lessonUICoordinator = null;
@@ -424,7 +430,7 @@
 
     // 清理完成状态标志
     isPaused = false;
-    lastHintTechnique = null;
+    if (achievementCoordinator) achievementCoordinator.lastHintTechnique = null;
 
     // 清理连击系统
     if (comboSystem) {
@@ -1201,14 +1207,14 @@
       board: board,
       renderer: renderer,
       storyEngine: storyEngine,
-      lessonPlayer: lessonPlayer,
+      lessonPlayer: null, // 教学引导由 lessonUICoordinator 管理
       HintPlayerState: HintPlayerState,
       WhatIfState: WhatIfState,
       techMatrix: techMatrix,
       comedySystem: comedySystem,
       settingsPanel: settingsPanel,
-      achievementPanel: achievementPanel,
-      galleryPanel: galleryPanel,
+      achievementPanel: achievementCoordinator ? achievementCoordinator.achievementPanel : null,
+      galleryPanel: achievementCoordinator ? achievementCoordinator.galleryPanel : null,
       AudioService: AudioService,
       VIBRATE_PRESETS: VIBRATE_PRESETS,
       GuideBattle: (typeof GuideBattle !== 'undefined') ? GuideBattle : null,
@@ -1434,14 +1440,14 @@
     });
     document.getElementById('btn-achievement')?.addEventListener('click', () => {
       AudioService.sfx.play('click');
-      if (achievementPanel) {
-        achievementPanel.toggle();
+      if (achievementCoordinator) {
+        achievementCoordinator.toggleAchievementPanel();
       }
     });
     document.getElementById('btn-gallery')?.addEventListener('click', () => {
       AudioService.sfx.play('click');
-      if (galleryPanel) {
-        galleryPanel.toggle();
+      if (achievementCoordinator) {
+        achievementCoordinator.toggleGalleryPanel();
       }
     });
     document.getElementById('btn-chapter')?.addEventListener('click', () => {
@@ -1490,8 +1496,8 @@
               break;
             case 'gallery':
               // 图鉴按钮可能在工具栏，尝试调用
-              if (typeof galleryPanel !== 'undefined' && galleryPanel) {
-                galleryPanel.show();
+              if (achievementCoordinator && achievementCoordinator.galleryPanel) {
+                achievementCoordinator.showGalleryPanel();
               } else {
                 document.getElementById('btn-gallery')?.click();
               }
@@ -2121,202 +2127,63 @@
   global._setAISpeedMultiplier = _setAISpeedMultiplier;
   global._resetAISpeedMultiplier = _resetAISpeedMultiplier;
 
-  // === Auto Hint (决策层触发) ===
-  /**
-   * 执行自动提示（由决策层 TRIGGER_HINT 动作触发）
-   * 与手动提示的区别：
-   * 1. 带角色对话前缀"让我看看..."，更有代入感
-   * 2. 冷却时间独立计算（自动提示冷却更长）
-   * 3. 不消耗玩家提示次数（算0.5次，用于成就判定）
-   * 4. 自动提示时喜剧系统静音
-   * 5. Boss战中频率降低
-   * @param {Object} params - { hintLevel, reason, character, isNovice, technique }
-   */
-  function showAutoHint(params = {}) {
-    if (!hintSystem) return;
+  // ============================================================
+  // AutoHintSystem - 自动提示系统
+  // 已迁移至 expert/AutoHintSystem.js
+  // 向后兼容：转发到 autoHintSystem 实例
+  // ============================================================
 
-    // What If 模式下不自动提示
-    if (WhatIfState && WhatIfState.active) return;
+  function _initAutoHintSystem() {
+    if (!AutoHintSystem) return;
+    if (autoHintSystem) return;
 
-    // 教学引导激活时不自动提示
-    if (lessonPlayer && lessonPlayer.isActive) return;
-
-    // Boss 战中自动提示频率降低（检查 Boss 战专用冷却）
-    const isBoss = typeof isLastLevelOfChapter === 'function' ? isLastLevelOfChapter() : false;
-    if (isBoss && bossBattleStarted) {
-      // Boss战中，自动提示触发概率降低到 30%（模拟更有挑战感）
-      if (Math.random() > 0.3) {
-        log.info('[AutoHint] Boss战中抑制自动提示');
-        return;
-      }
-    }
-
-    const requestedLevel = params.hintLevel || 1;
-    const reason = params.reason || 'stuck';
-    const charId = params.character || 'ayan';
-
-    // 记录自动提示到感知层（触发冷却）
-    expertSystem.onHint(true);
-
-    // === GameContext 同步：提示使用计数 ===
-    try {
-      if (global.GameContext && global.GameContext.player) {
-        global.GameContext.player.hintUsageCount++;
-      }
-    } catch (e) {}
-
-    // 调用 HintSystem 获取提示
-    const hint = hintSystem.getHint();
-    if (!hint) {
-      log.warn('[AutoHint] HintSystem 返回空');
-      return;
-    }
-
-    // 播放提示音效
-    if (typeof AudioService !== 'undefined') {
-      AudioService.sfx.play('hint');
-    }
-
-    // 喜剧系统防火墙：自动提示时喜剧静音（通过全局临时静音标志）
-    if (comedySystem) {
-      _autoHintMuteUntil = Date.now() + 5000; // 静音5秒
-    }
-
-    const { character, characterName, dialogue, target, targetCells, techniqueName,
-            isFirstEncounter, teachingDialog } = hint;
-
-    // 记录技巧遭遇（用于新手保护规则）
-    if (hint.technique && expertSystem && typeof expertSystem.onTechniqueEncounter === 'function') {
-      expertSystem.onTechniqueEncounter(hint.technique);
-    }
-
-    // 记录本次提示使用的技巧（用于正确填数时触发技巧类成就）
-    lastHintTechnique = techniqueName || null;
-
-    // 自动提示的提示计数：算 0.5 次（不消耗完整次数）
-    hintCount += 0.5;
-
-    // 累计总提示次数（自动提示算半次）
-    if (global.ProgressManager) {
-      ProgressManager.addHintCount(0.5);
-      if (currentChapterData && !currentLevelData.isHidden) {
-        ProgressManager.setChapterHintUsed(currentChapterData.chapterId);
-      }
-      ProgressManager.resetNoHintStreak();
-    }
-
-    EventLogger.log('game:auto_hint', {
-      character: characterName,
-      target,
-      targetCells,
-      technique: techniqueName,
-      reason,
-      hintLevel: hint.hintLevel,
-    });
-
-    // 清除之前的提示高亮
-    if (renderer && typeof renderer.clearHintHighlights === 'function') {
-      renderer.clearHintHighlights('hint');
-    }
-
-    // 选中目标格
-    if (target && board) {
-      let tRow, tCol;
-      if (target.row !== undefined && target.col !== undefined) {
-        tRow = target.row;
-        tCol = target.col;
-      } else if (target.cells && target.cells.length > 0) {
-        const first = target.cells[0];
-        if (first.row !== undefined && first.col !== undefined) {
-          tRow = first.row;
-          tCol = first.col;
-        }
-      }
-      if (tRow !== undefined && tCol !== undefined) {
-        board.selectCell(tRow, tCol);
-      }
-    }
-
-    renderer.render(board);
-
-    // 首次遇到技巧：播放完整教学对话
-    if (isFirstEncounter && teachingDialog && teachingDialog.length > 0 && storyEngine) {
-      playFirstEncounterTeaching(teachingDialog, character, techniqueName, targetCells);
-      return;
-    }
-
-    // 使用动画播放器（所有 deduction 类型提示都用动画播放）
-    if (renderer && typeof renderer.playHintAnimation === 'function'
-        && hint.hintType === 'deduction') {
-      // 自动提示添加前缀对话
-      hint._autoHintIntro = _getAutoHintIntro(charId, reason);
-      playHintAnimation(hint);
-      return;
-    }
-
-    // Fallback: 高亮 + 角色气泡
-    if (targetCells && targetCells.length > 0 && renderer && typeof renderer.highlightHintCells === 'function') {
-      renderer.highlightHintCells(targetCells, 'hint', 'hint');
-    }
-
-    if (techMatrix && hint.hintType === 'deduction') {
-      if (!hint._evidenceNormalized && typeof _normalizeEvidence === 'function') {
-        hint.evidence = _normalizeEvidence(hint);
-        hint._evidenceNormalized = true;
-      }
-      techMatrix.showEvidence(hint);
-    }
-
-    // 自动提示：显示带角色前缀的气泡
-    const intro = _getAutoHintIntro(charId, reason);
-    const prefix = techniqueName ? `【${techniqueName}】` : '';
-    const finalChar = params.character || character;
-    const finalCharName = params.character ? _getCharacterName(params.character) : characterName;
-    showCharacterBubble(finalChar, {
-      text: intro + ' ' + prefix + dialogue,
-      speakerName: finalCharName,
-      duration: 5000,
-      type: 'hint',
+    autoHintSystem = new AutoHintSystem({
+      getHintSystem: () => hintSystem,
+      getWhatIfState: () => WhatIfState,
+      getLessonUICoordinator: () => lessonUICoordinator,
+      isLastLevelOfChapter: () => isLastLevelOfChapter(),
+      isBossBattleStarted: () => bossBattleStarted,
+      getExpertSystem: () => expertSystem,
+      getGameContext: () => global.GameContext,
+      getComedySystem: () => comedySystem,
+      getAchievementCoordinator: () => achievementCoordinator,
+      getHintCount: () => hintCount,
+      addHintCount: (delta) => { hintCount += delta; },
+      getProgressManager: () => global.ProgressManager,
+      getCurrentChapterData: () => currentChapterData,
+      getCurrentLevelData: () => currentLevelData,
+      getRenderer: () => renderer,
+      getBoard: () => board,
+      getStoryEngine: () => storyEngine,
+      playFirstEncounterTeaching: (d, c, t, cells) => playFirstEncounterTeaching(d, c, t, cells),
+      playHintAnimation: (hint) => playHintAnimation(hint),
+      getTechMatrix: () => techMatrix,
+      normalizeEvidence: (hint) => _normalizeEvidence(hint),
+      showCharacterBubble: (charId, opts) => showCharacterBubble(charId, opts),
     });
   }
 
-  /**
-   * 获取自动提示的开场白
-   */
+  function showAutoHint(params = {}) {
+    if (!autoHintSystem) _initAutoHintSystem();
+    if (!autoHintSystem) return;
+    autoHintSystem.showAutoHint(params);
+  }
+
   function _getAutoHintIntro(charId, reason) {
+    if (!autoHintSystem) _initAutoHintSystem();
+    // 直接调用 AutoHintSystem 内部函数不可行，保持一个本地副本用于向后兼容
+    // 实际逻辑已迁移，这里提供降级实现
     const intros = {
-      ayan: {
-        stuck: '让我看看...嗯，',
-        anxiety: '别急，',
-        novice: '这个嘛，',
-        flow_drop: '刚才思路不错，',
-      },
-      cagekeeper: {
-        stuck: '观察盘面。',
-        anxiety: '冷静下来。',
-        novice: '基础要打牢。',
-        flow_drop: '保持节奏。',
-      },
-      ying: {
-        stuck: '我来帮你看看！',
-        anxiety: '别着急别着急~',
-        novice: '我教你呀！',
-        flow_drop: '加油加油！',
-      },
+      ayan: { stuck: '让我看看...嗯，', anxiety: '别急，', novice: '这个嘛，', flow_drop: '刚才思路不错，' },
+      cagekeeper: { stuck: '观察盘面。', anxiety: '冷静下来。', novice: '基础要打牢。', flow_drop: '保持节奏。' },
+      ying: { stuck: '我来帮你看看！', anxiety: '别着急别着急~', novice: '我教你呀！', flow_drop: '加油加油！' },
     };
     const charIntros = intros[charId] || intros.ayan;
     return charIntros[reason] || charIntros.stuck;
   }
 
-  /**
-   * 获取角色中文名
-   */
   function _getCharacterName(charId) {
-    const names = {
-      ayan: '阿妍',
-      cagekeeper: '守笼人',
-      ying: '莹莹',
-    };
+    const names = { ayan: '阿妍', cagekeeper: '守笼人', ying: '莹莹' };
     return names[charId] || '阿妍';
   }
 
@@ -2356,7 +2223,7 @@
     const { character, characterName, dialogue, target, targetCells, techniqueName, isFirstEncounter, teachingDialog } = hint;
 
     // 记录本次提示使用的技巧（用于正确填数时触发技巧类成就）
-    lastHintTechnique = techniqueName || null;
+    if (achievementCoordinator) achievementCoordinator.lastHintTechnique = techniqueName || null;
 
     // Clear previous hint highlights
     if (renderer && typeof renderer.clearHintHighlights === 'function') {
@@ -2757,7 +2624,7 @@
       board: board,
       renderer: renderer,
       techMatrix: techMatrix,
-      lessonPlayer: lessonPlayer,
+      lessonPlayer: null, // 教学引导由 lessonUICoordinator 管理
       AudioService: AudioService,
       onShowToast: showToast,
       onUpdateRule45Banner: updateRule45Banner,
@@ -2963,9 +2830,9 @@
     const solution = currentLevelData.solution;
 
     // === 教学引导：guided 阶段输入反馈 ===
-    if (lessonPlayer && lessonPlayer.isWaitingInput) {
+    if (lessonUICoordinator && lessonUICoordinator.isWaitingInput) {
       // NOTE_ONLY 模式下，填数逻辑不触发教学反馈（由笔记切换逻辑处理）
-      const interactionType = lessonPlayer.getInteractionType();
+      const interactionType = lessonUICoordinator.getInteractionType();
       if (interactionType !== 'NOTE_ONLY') {
         let targetR, targetC;
         if (targetCell) {
@@ -3114,10 +2981,13 @@
       usedNotes = true;
 
       // === 教学引导：笔记输入检测 ===
-      if (lessonPlayer && lessonPlayer.isActive) {
+      if (lessonUICoordinator && lessonUICoordinator.isActive && lessonUICoordinator.lessonPlayer) {
         // 检查切换后这个数字是否还在候选里（toggle 是添加还是移除）
         const wasAdded = cell.candidates.has(num);
-        const noteResult = lessonPlayer.handleNoteToggle(r, c, num, wasAdded);
+        const lp = lessonUICoordinator.lessonPlayer;
+        const noteResult = lp.handleNoteToggle
+          ? lp.handleNoteToggle(r, c, num, wasAdded)
+          : null;
         if (noteResult && noteResult.handled && noteResult.noteComplete) {
           // 笔记完成，播放成功反馈
           AudioService.sfx.play('fill_correct');
@@ -3146,11 +3016,11 @@
       // 技巧类成就检测：必须在填数前检测，使用填数前的盘面状态
       let detectedTechForAchievement = null;
       if (global.ProgressManager) {
-        if (lastHintTechnique) {
+        if (achievementCoordinator && achievementCoordinator.lastHintTechnique) {
           // 方案b（教学判定）：玩家看过该技巧的提示后正确填数，记录该技巧使用
-          detectedTechForAchievement = lastHintTechnique;
+          detectedTechForAchievement = achievementCoordinator.lastHintTechnique;
           // 使用后清除，避免一次提示多次计数
-          lastHintTechnique = null;
+          achievementCoordinator.lastHintTechnique = null;
         } else {
           // 方案a（技术判定）：玩家正确填入数字，通过TechRater检测该数字可由哪种技巧推导
           detectedTechForAchievement = detectTechniqueForFill(r, c, num);
@@ -3176,9 +3046,8 @@
       EventLogger.log('game:fill_correct', { row: r, col: c, num });
 
       // === 教学引导：What If 模式下填数统计（semiAuto 阶段） ===
-      if (lessonPlayer && lessonPlayer.isActive && WhatIfState && WhatIfState.active
-          && typeof lessonPlayer.handleWhatIfCellFill === 'function') {
-        lessonPlayer.handleWhatIfCellFill(r, c, num);
+      if (lessonUICoordinator && lessonUICoordinator.isActive && WhatIfState && WhatIfState.active) {
+        lessonUICoordinator.handleWhatIfCellFill(r, c, num);
       }
 
       // 记录技巧使用（在填数后触发，避免影响填数逻辑）
@@ -3287,23 +3156,16 @@
   // 向后兼容：ThreeActGuide 变量指向 threeActEngine 实例
   // 所有逻辑已迁移到 ThreeActEngine 类
 
-  // === Win Condition Manager (分层过关系统) ===
+  // ============================================================
+  // WinConditionManager - 分层过关系统
+  // 已迁移至 game/WinConditionManager.js
+  // 向后兼容：WinConditionManager 已在文件顶部从 window 导入
+  // ============================================================
 
-  /**
-   * WinConditionManager - 分层过关逻辑管理器
-   *
-   * 关卡类型与通关条件：
-   *   - 新手关 (novice):   填完所有 simple 格
-   *   - 中盘关 (midgame):  填完所有 simple + 至少 1 个 gate
-   *   - 收官关 (endgame):  填完所有 simple + 所有 gate
-   *   - Boss 关 (boss):    填完所有空格 (100%) —— 由 Boss 战系统接管
-   *
-   * 通关后表现：
-   *   - 新手关/中盘关：剩余 core/gate 自动补全
-   *   - 收官关：剩余 core 自动补全，播放"雪崩"动画
-   *   - Boss 关：完整胜利动画（现有逻辑）
-   */
-  const WinConditionManager = (function() {
+  // （WinConditionManager IIFE 已迁移到 game/WinConditionManager.js）
+  // 以下为占位，实际使用的是顶部从 window 导入的引用
+
+  const _WinConditionManager_placeholder = (function() {
 
     // 关卡类型枚举
     const LEVEL_TYPES = {
@@ -4607,211 +4469,15 @@
 
   /**
    * 播放通关高潮动画（破案印章四步序列）
-   * 步骤1：毛玻璃从中心扩散（0.8s）+ 落锁声
-   * 步骤2：大印章砸下（0.6s）+ 印章重击声 + 震动
-   * 步骤3：毛玻璃碎裂消散（0.5s）+ 玻璃碎裂声
-   * 步骤4：结算面板滑入（0.5s）
-   * @param {Function} callback - 动画完成后回调（显示结算面板）
+   * 已迁移至 game/achievement-coordinator.js (AchievementCoordinator)
    */
   function playClimaxAnimation(callback) {
-    const overlay = document.getElementById('climax-overlay');
-    const frosted = document.getElementById('climax-frosted');
-    const stamp = document.getElementById('climax-stamp');
-    const shardsContainer = document.getElementById('climax-shards');
-
-    if (!overlay || !frosted || !stamp) {
+    if (!achievementCoordinator) {
       if (callback) callback();
       return;
     }
-
-    // PC 双栏模式：将动画容器移入左侧棋盘区域
-    const pcBoardContainer = document.getElementById('pc-board-container');
-    const isPcLayout = _isPcLayout && pcBoardContainer;
-    let originalParent = null;
-    let originalNextSibling = null;
-    let originalPosition = null;
-    let originalTop = null;
-    let originalLeft = null;
-    let originalWidth = null;
-    let originalHeight = null;
-    let originalZIndex = null;
-
-    if (isPcLayout) {
-      // 保存原始位置和样式
-      originalParent = overlay.parentElement;
-      originalNextSibling = overlay.nextSibling;
-      originalPosition = overlay.style.position;
-      originalTop = overlay.style.top;
-      originalLeft = overlay.style.left;
-      originalWidth = overlay.style.width;
-      originalHeight = overlay.style.height;
-      originalZIndex = overlay.style.zIndex;
-
-      // 将 overlay 移入左侧棋盘容器
-      pcBoardContainer.style.position = 'relative';
-      pcBoardContainer.appendChild(overlay);
-
-      // 修改样式以适应棋盘容器
-      overlay.style.position = 'absolute';
-      overlay.style.top = '0';
-      overlay.style.left = '0';
-      overlay.style.width = '100%';
-      overlay.style.height = '100%';
-      overlay.style.zIndex = '20';
-      overlay.classList.add('climax-pc-mode');
-    }
-
-    // 重置状态
-    overlay.style.display = 'block';
-    overlay.classList.remove('climax-shake');
-    frosted.className = 'climax-frosted';
-    stamp.className = 'climax-stamp';
-    // 清空碎片
-    if (shardsContainer) shardsContainer.innerHTML = '';
-
-    // 步骤1：毛玻璃从中心扩散（0.8s）
-    // 播放落锁声（使用 key_unlock 或 seal_stamp 作为替代，缺失则静默）
-    try {
-      if (typeof AudioService !== 'undefined' && AudioService.sfx) {
-        AudioService.sfx.play('key_unlock');
-      }
-    } catch(e) {}
-
-    requestAnimationFrame(() => {
-      frosted.classList.add('climax-step1');
-    });
-
-    // 步骤2：0.8s 后印章砸下
-    setTimeout(() => {
-      stamp.classList.add('climax-step2');
-      // 印章重击声 + 震动
-      try {
-        if (typeof AudioService !== 'undefined' && AudioService.sfx) {
-          AudioService.sfx.play('seal_stamp');
-        }
-      } catch(e) {}
-      // 震动效果（如果设备支持）
-      try {
-        vibrate(VIBRATE_PRESETS.CLIMAX);
-      } catch(e) {}
-      // overlay 震动
-      setTimeout(() => {
-        overlay.classList.add('climax-shake');
-        setTimeout(() => {
-          overlay.classList.remove('climax-shake');
-        }, 300);
-      }, 300); // 印章"砸下"瞬间（动画约 60% 位置）
-    }, 800);
-
-    // 步骤3：1.4s 后（0.8 + 0.6）毛玻璃碎裂消散
-    setTimeout(() => {
-      frosted.classList.remove('climax-step1');
-      frosted.classList.add('climax-step3');
-
-      // 生成玻璃碎片
-      if (shardsContainer) {
-        _spawnClimaxShards(shardsContainer, 18);
-      }
-
-      // 玻璃碎裂声（用 paper_flip 或其他替代，缺失则静默）
-      try {
-        if (typeof AudioService !== 'undefined' && AudioService.sfx) {
-          // 优先使用 chain_pop 模拟碎裂感，没有就用 paper_flip
-          AudioService.sfx.play('chain_pop');
-        }
-      } catch(e) {}
-    }, 1400);
-
-    // 步骤4：1.9s 后（1.4 + 0.5）印章淡出，显示结算面板
-    setTimeout(() => {
-      stamp.classList.add('climax-step4');
-
-      // 再给一点时间让印章淡出，然后显示结算
-      setTimeout(() => {
-        // 隐藏 overlay
-        overlay.style.display = 'none';
-        // 清理碎片
-        if (shardsContainer) shardsContainer.innerHTML = '';
-
-        // PC 双栏模式：将动画容器移回原位置
-        if (isPcLayout && originalParent) {
-          overlay.classList.remove('climax-pc-mode');
-          overlay.style.position = originalPosition;
-          overlay.style.top = originalTop;
-          overlay.style.left = originalLeft;
-          overlay.style.width = originalWidth;
-          overlay.style.height = originalHeight;
-          overlay.style.zIndex = originalZIndex;
-          if (originalNextSibling) {
-            originalParent.insertBefore(overlay, originalNextSibling);
-          } else {
-            originalParent.appendChild(overlay);
-          }
-        }
-
-        if (callback) callback();
-      }, 300);
-    }, 1900);
+    achievementCoordinator.playClimaxAnimation(callback);
   }
-
-  /**
-   * 生成玻璃碎片
-   */
-  function _spawnClimaxShards(container, count) {
-    if (!container) return;
-    // 使用容器尺寸而不是窗口尺寸，适配 PC 双栏模式
-    const rect = container.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
-
-    // 根据容器大小调整碎片数量和距离
-    const isSmallContainer = w < window.innerWidth * 0.7;
-    const adjustedCount = isSmallContainer ? Math.max(8, Math.floor(count * 0.6)) : count;
-    const maxDistance = isSmallContainer ? Math.min(w, h) * 0.5 : 300;
-    const minDistance = isSmallContainer ? Math.min(w, h) * 0.2 : 150;
-
-    for (let i = 0; i < adjustedCount; i++) {
-      const shard = document.createElement('div');
-      shard.className = 'climax-shard';
-
-      // 随机大小和形状（小容器中缩小碎片）
-      const sizeScale = isSmallContainer ? 0.6 : 1;
-      const size = (8 + Math.random() * 20) * sizeScale;
-      const width = size * (0.5 + Math.random() * 1.5);
-      const height = size * (0.5 + Math.random() * 1.5);
-
-      // 从中心出发的随机方向
-      const angle = Math.random() * Math.PI * 2;
-      const distance = minDistance + Math.random() * (maxDistance - minDistance);
-      const sx = Math.cos(angle) * distance;
-      const sy = Math.sin(angle) * distance;
-      const sr = (Math.random() - 0.5) * 720; // 旋转角度
-
-      shard.style.cssText = `
-        left: ${w / 2 + (Math.random() - 0.5) * 100 * sizeScale}px;
-        top: ${h / 2 + (Math.random() - 0.5) * 100 * sizeScale}px;
-        width: ${width}px;
-        height: ${height}px;
-        --sx: ${sx}px;
-        --sy: ${sy}px;
-        --sr: ${sr}deg;
-        clip-path: polygon(${Math.random() * 30}% 0%, 100% ${Math.random() * 30}%, ${70 + Math.random() * 30}% 100%, 0% ${70 + Math.random() * 30}%);
-      `;
-
-      container.appendChild(shard);
-
-      // 触发动画
-      requestAnimationFrame(() => {
-        shard.classList.add('animate');
-      });
-
-      // 动画结束后移除
-      setTimeout(() => {
-        if (shard.parentNode) shard.parentNode.removeChild(shard);
-      }, 700);
-    }
-  }
-
   // === Save Progress ===
   function saveProgress(timeSeconds, errors, hints, grade) {
     if (!global.ProgressManager) return;
@@ -4828,8 +4494,8 @@
     checkAchievements(timeSeconds, errors, hints, grade);
 
     // 刷新成就面板
-    if (achievementPanel) {
-      try { achievementPanel.refresh(); } catch (e) {}
+    if (achievementCoordinator) {
+      achievementCoordinator.refreshAchievementPanel();
     }
 
     // Unlock next chapter if this is the last level of current chapter
@@ -4867,183 +4533,22 @@
     }
   }
 
-  // === 成就检查 ===
+  // === 成就检查（已迁移至 GameController，向后兼容转发） ===
   function checkAchievements(timeSeconds, errors, hints, grade) {
-    if (!global.ProgressManager) return;
-
-    // first_clear: 首次通关（保留旧成就兼容）
-    ProgressManager.unlockAchievement('first_clear');
-
-    // === 进度类成就（8个）===
-
-    if (currentChapterData && chapterSelect && chapterSelect.chaptersData) {
-      const chId = currentChapterData.chapterId;
-
-      // 检查各章通关成就（chapter1_clear ~ chapter7_clear）
-      const chapterClearAchievements = {
-        1: 'chapter1_clear',
-        2: 'chapter2_clear',
-        3: 'chapter3_clear',
-        4: 'chapter4_clear',
-        5: 'chapter5_clear',
-        6: 'chapter6_clear',
-        7: 'chapter7_clear',
-      };
-      for (const [chapId, achId] of Object.entries(chapterClearAchievements)) {
-        if (ProgressManager.isChapterCleared(parseInt(chapId), chapterSelect.chaptersData)) {
-          ProgressManager.unlockAchievement(achId);
-        }
-      }
-
-      // all_chapters_clear: 全部章节通关
-      if (ProgressManager.isAllChaptersCleared(chapterSelect.chaptersData)) {
-        ProgressManager.unlockAchievement('all_chapters_clear');
-      }
-
-      // chapter1_s: 第一章全S级（保留旧成就）
-      if (ProgressManager.isChapterAllS(1, chapterSelect.chaptersData)) {
-        ProgressManager.unlockAchievement('chapter1_s');
-      }
-    }
-
-    // === 挑战类成就（5个）===
-
-    // speed_demon: 120秒内完成任意关卡
-    if (timeSeconds > 0 && timeSeconds <= 120 && !currentLevelData.isHidden) {
-      ProgressManager.unlockAchievement('speed_demon');
-    }
-
-    // speed_5min: 5分钟内通关任意9×9关卡（保留旧成就兼容）
-    const gridSize = currentLevelData ? (currentLevelData.gridSize || 9) : 9;
-    if (gridSize === 9 && timeSeconds <= 300 && !currentLevelData.isHidden) {
-      ProgressManager.unlockAchievement('speed_5min');
-    }
-
-    // flawless_victory: 单关零错误通关
-    if (errors === 0 && !currentLevelData.isHidden) {
-      ProgressManager.unlockAchievement('flawless_victory');
-    }
-
-    // no_hint_run: 连续3关不使用提示通关
-    if (hints === 0 && !currentLevelData.isHidden) {
-      const streak = ProgressManager.incrementNoHintStreak();
-      if (streak >= 3) {
-        ProgressManager.unlockAchievement('no_hint_run');
-      }
-    } else {
-      // 使用了提示，重置连击
-      ProgressManager.resetNoHintStreak();
-    }
-
-    // no_hint_chapter: 一章内全程无提示
-    // 在章节最后一关通关时，检查本章是否全程未使用提示
-    if (currentChapterData && isLastLevelOfChapter() && !currentLevelData.isHidden) {
-      const chapterId = currentChapterData.chapterId;
-      // 如果本章全程无提示，标记并解锁成就
-      if (hints === 0 && ProgressManager.markChapterNoHint(chapterId)) {
-        ProgressManager.unlockAchievement('no_hint_chapter');
-      }
-    }
-
-    // no_hint_ch1: 第一章某关不使用提示通关（保留旧成就兼容）
-    if (hints === 0 && currentLevelId >= 100 && currentLevelId < 200 &&
-        !currentLevelData.isHidden) {
-      ProgressManager.unlockAchievement('no_hint_ch1');
-    }
-
-    // true_ending: 真结局通关（在 setTrueEndingCleared 中触发，此处补检）
-    if (ProgressManager.isTrueEndingCleared()) {
-      ProgressManager.unlockAchievement('true_ending');
-    }
-
-    // persistent: 累计游戏时长超过1小时（在 tick 中检查，这里补一次检查）
-    if (ProgressManager.getTotalPlayTime() >= 3600) {
-      ProgressManager.unlockAchievement('persistent');
-    }
-
-    // === 探索类成就（3个）===
-
-    // first_hidden_level: 解锁第一个隐藏关
-    if (ProgressManager.getUnlockedHiddenCount() >= 1) {
-      ProgressManager.unlockAchievement('first_hidden_level');
-    }
-
-    // all_hidden_levels: 解锁全部隐藏关
-    if (chapterSelect && chapterSelect.chaptersData) {
-      const totalHidden = ProgressManager.getTotalHiddenCount(chapterSelect.chaptersData);
-      if (totalHidden > 0 && ProgressManager.getUnlockedHiddenCount() >= totalHidden) {
-        ProgressManager.unlockAchievement('all_hidden_levels');
-      }
-    }
-
-    // seal_collector: 收集全部5枚印记
-    if (ProgressManager.getUnlockedSealCount && ProgressManager.getUnlockedSealCount() >= 5) {
-      ProgressManager.unlockAchievement('seal_collector');
-    }
-
-    // === 技巧类成就 ===
-    // 技巧成就主要在 recordTechniqueUsage 中触发
-    // 此处补检一次，确保已使用过的技巧都能解锁
-    if (typeof ProgressManager.checkTechniqueAchievements === 'function') {
-      ProgressManager.checkTechniqueAchievements();
-    }
-
-    // note_master: 单关标记超过50个候选数（在 toggleCandidate 中计数，这里检查）
-    checkNoteMasterAchievement();
-
-    // === 印记系统 ===
-    checkSealsOnComplete(timeSeconds, errors, hints);
+    if (!gameController) return;
+    gameController.checkAchievements(timeSeconds, errors, hints, grade);
   }
 
-  // 检查 note_master 成就
+  // === 检查 note_master 成就（已迁移至 GameController，向后兼容转发） ===
   function checkNoteMasterAchievement() {
-    if (!global.ProgressManager || !board) return;
-    if (ProgressManager.hasAchievement('note_master')) return;
-
-    let noteCount = 0;
-    for (let r = 0; r < board.size; r++) {
-      for (let c = 0; c < board.size; c++) {
-        noteCount += board.cells[r][c].candidates.size;
-      }
-    }
-    if (noteCount >= 50) {
-      ProgressManager.unlockAchievement('note_master');
-    }
+    if (!gameController) return;
+    gameController.checkNoteMasterAchievement();
   }
 
-  // === 印记系统：通关检查 ===
+  // === 印记系统：通关检查（已迁移至 GameController，向后兼容转发） ===
   function checkSealsOnComplete(timeSeconds, errors, hints) {
-    if (!global.ProgressManager) return;
-    if (!currentLevelData || !currentLevelData.isHidden) return;
-
-    const levelId = currentLevelData.levelId;
-    const sealDef = ProgressManager.getSealDefByLevel(levelId);
-    if (!sealDef) return;
-    if (ProgressManager.isSealUnlocked(sealDef.id)) return;
-
-    const stats = {
-      errors: errors || 0,
-      hints: hints || 0,
-      timeSeconds: timeSeconds || 0,
-      usedNotes: usedNotes,
-      levelId: levelId
-    };
-
-    if (ProgressManager.checkSealCondition(sealDef.id, stats)) {
-      const levelScore = {
-        time: timeSeconds,
-        errors: errors,
-        hints: hints,
-        grade: 'S'
-      };
-      ProgressManager.unlockSeal(sealDef.id, levelScore);
-      showSealUnlockAnimation(sealDef);
-      log.info('Seal unlocked:', sealDef.id, sealDef.name);
-      // 检查 seal_collector 成就（收集全部5枚印记）
-      if (ProgressManager.getUnlockedSealCount && ProgressManager.getUnlockedSealCount() >= 5) {
-        ProgressManager.unlockAchievement('seal_collector');
-      }
-    }
+    if (!gameController) return;
+    gameController.checkSealsOnComplete(timeSeconds, errors, hints);
   }
 
   // === 印记解锁动画 ===
@@ -5054,38 +4559,9 @@
   }
 
   // === 技巧使用记录（用于技巧类成就） ===
-  // 将提示系统中的 techniqueName（中文名）映射到进度统计中的键名
-  // 与 TechRater / HintSystem 的 10 种技巧对齐
-  // 同时兼容教学系统中的 newSkill 命名
-  const TECHNIQUE_NAME_TO_ID = {
-    // 基础技巧
-    '裸单法': 'nakedSingle',
-    '隐单法': 'hiddenSingle',
-    '笼子唯一组合': 'cageUnique',
-    // 杀手数独技巧
-    '45法则': 'rule45',
-    '笼和推导': 'cageUnique',
-    '笼和数对': 'cageUnique',
-    // 进阶技巧
-    '裸数对': 'nakedPair',
-    '隐数对': 'hiddenPair',
-    '区块排除': 'pointingClaiming',
-    '裸三数组': 'nakedTriplet',
-    // 高阶技巧
-    '二连纵横阵': 'xWing',
-    '三才游鱼阵': 'swordfish',
-    // 教学系统 newSkill 命名兼容
-    'row_rule': 'nakedSingle',
-    'col_rule': 'nakedSingle',
-    'palace_rule': 'nakedSingle',
-    'box_rule': 'nakedSingle',
-    'rule_of_45': 'rule45',
-    'naked_single': 'nakedSingle',
-    'hidden_single': 'hiddenSingle',
-    'naked_pair': 'nakedPair',
-    'hidden_pair': 'hiddenPair',
-    'x_wing': 'xWing',
-  };
+  // 映射表已迁移到 game/achievement-coordinator.js (全局 TECHNIQUE_NAME_TO_ID)
+  // detectTechniqueForFill 和 recordTechniqueUsage 已迁移到 GameController
+  // 向后兼容：转发到 gameController
 
   /**
    * 检测玩家填入某格数字时使用的技巧（技术判定方案a）
@@ -5113,37 +4589,10 @@
 
   }
 
-  // === 成就解锁Toast ===
+  // === 成就解锁Toast（第七阶段抽离至 achievementCoordinator） ===
   function showAchievementToast(achievement) {
-    const existing = document.querySelector('.achievement-toast');
-    if (existing) existing.remove();
-
-    const toast = document.createElement('div');
-    toast.className = 'achievement-toast';
-    toast.style.cssText = 'position:fixed;top:80px;right:20px;' +
-      'background:linear-gradient(135deg,rgba(251,191,36,0.15),rgba(30,41,59,0.95));' +
-      'border:1px solid rgba(251,191,36,0.5);border-radius:12px;' +
-      'padding:16px 20px;z-index:25000;min-width:240px;' +
-      'box-shadow:0 4px 20px rgba(251,191,36,0.2);' +
-      'transform:translateX(400px);transition:transform 0.5s cubic-bezier(0.4,0,0.2,1);';
-    toast.innerHTML =
-      '<div style="display:flex;align-items:center;gap:12px;">' +
-      '<div style="font-size:32px;">' + achievement.icon + '</div>' +
-      '<div style="flex:1;">' +
-      '<div style="font-size:11px;color:#fbbf24;letter-spacing:2px;margin-bottom:2px;">成就解锁</div>' +
-      '<div style="font-size:15px;font-weight:700;color:#fef3c7;">' + achievement.name + '</div>' +
-      '<div style="font-size:12px;color:#94a3b8;margin-top:2px;">' + achievement.desc + '</div>' +
-      '</div>' +
-      '</div>';
-    document.body.appendChild(toast);
-
-    requestAnimationFrame(function() {
-      toast.style.transform = 'translateX(0)';
-    });
-    setTimeout(function() {
-      toast.style.transform = 'translateX(400px)';
-      setTimeout(function() { toast.remove(); }, 500);
-    }, 3500);
+    if (!achievementCoordinator) return;
+    achievementCoordinator.showAchievementToast(achievement);
   }
 
   // === Grade Calculation ===
@@ -5523,7 +4972,7 @@
     // 优先级高于 SHOW_TOAST，低于 EUREKA 和 TEACHING
     expertSystem.expression.registerActionHandler('TRIGGER_HINT', (params) => {
       // 如果正在播放教学引导，不自动提示
-      if (lessonPlayer && lessonPlayer.isActive) return;
+      if (lessonUICoordinator && lessonUICoordinator.isActive) return;
 
       // 如果已有提示动画在播放，排队或替换
       if (typeof HintPlayerState !== 'undefined' && HintPlayerState.playing) {
@@ -5713,114 +5162,13 @@
   function showToast(msg, duration) { return UIManager.showToast(msg, duration); }
   function hideToast() { return UIManager.hideToast(); }
 
-  // === 调试工具集（在控制台使用）
-  // ============================================================
-  const DEBUG_TOOLS = {
-    // 1. 渲染状态检查
-    checkRender: function() {
-      console.log('=== [Debug] cellSize:', renderer ? renderer.cellSize : 'renderer not found');
-      console.log('[Debug] board size:', board ? board.size : 'board not found');
-      console.log('[Debug] selectedCell:', board && board.selectedCell ? `(${board.selectedCell.r},${board.selectedCell.c})` : 'none');
-      console.log('[Debug] history length:', board ? board.history.length : 0);
-      if (board && board.history.length > 0) {
-        const last = board.history[board.history.length - 1];
-        console.log('[Debug] last action:', last.type, last.r !== undefined ? `(${last.r},${last.c})` : '', last.value !== undefined ? '=' + last.value : '');
-      }
-      console.log('[Debug] bossBattleStarted:', bossBattleStarted);
-      console.log('[Debug] GuideBattle.active:', GuideBattle ? GuideBattle.active : 'N/A');
-      if (GuideBattle && GuideBattle.active) {
-        console.log('[Debug] playerCount:', GuideBattle.playerCount, '/', GuideBattle.winTarget);
-        console.log('[Debug] aiCount:', GuideBattle.aiCount, '/', GuideBattle.winTarget);
-      }
-    },
-
-    // 2. 棋盘快照
-    snapshot: function() {
-      if (!board) return;
-      console.log('=== [Debug] Board Snapshot ===');
-      for (let r = 0; r < board.size; r++) {
-        let row = '';
-        for (let c = 0; c < board.size; c++) {
-          const cell = board.cells[r][c];
-          const v = cell.fixedNum || cell.fillNum || 0;
-          const ai = cell.isAiFilled ? '*' : ' ';
-          row += v + ai + ' ';
-        }
-        console.log(row);
-      }
-    },
-
-    // 3. AI状态追踪
-    traceAI: function() {
-      if (!GuideBattle || !GuideBattle.active) {
-        console.log('[Debug] No active boss battle');
-        return;
-      }
-      console.log('=== [Debug] AI State ===');
-      console.log('AI personality:', GuideBattle._aiPlayer ? GuideBattle._aiPlayer.getPersonality().name : 'N/A');
-      console.log('AI move count:', GuideBattle._aiPlayer ? GuideBattle._aiPlayer.getMoveCount() : 0);
-      console.log('AI thinking:', GuideBattle._aiThinking);
-      if (GuideBattle._aiPlayer) {
-        const step = GuideBattle._aiPlayer.think();
-        if (step) {
-          console.log('AI next would fill:', `(${step.row},${step.col})=${step.num}`, 'tech:', step.techniqueName, 'thinkTime:', Math.round(step.thinkTime) + 'ms');
-        } else {
-          console.log('AI has no move (stuck!)');
-        }
-      }
-    },
-
-    // 4. 强制AI立刻走一步
-    forceAIMove: function() {
-      if (GuideBattle && GuideBattle.active) {
-        GuideBattle._aiMove();
-        console.log('[Debug] Forced AI move');
-      }
-    },
-
-    // 5. 重置当前关卡
-    reload: function() {
-      restartLevel();
-      console.log('[Debug] Level reloaded');
-    },
-
-    // 6. 开启AI详细日志
-    toggleAILog: function(enabled) {
-      window.DEBUG_AI = enabled !== false;
-      console.log('[Debug] AI debug logging:', window.DEBUG_AI ? 'ON' : 'OFF');
-    },
-
-    // 7. 显示AI所有数字（作弊模式，调试用）
-    revealAINumbers: function() {
-      if (!board || !GuideBattle.active) return;
-      for (let r = 0; r < board.size; r++) {
-        for (let c = 0; c < board.size; c++) {
-          const cell = board.cells[r][c];
-          if (cell.isAiFilled && cell._aiNum) {
-            cell.fillNum = cell._aiNum;
-          }
-        }
-      }
-      if (renderer) renderer.render(board);
-      console.log('[Debug] AI numbers revealed');
-    },
-
-    // 8. 隐藏AI数字（恢复正常）
-    hideAINumbers: function() {
-      if (!board) return;
-      for (let r = 0; r < board.size; r++) {
-        for (let c = 0; c < board.size; c++) {
-          const cell = board.cells[r][c];
-          if (cell.isAiFilled) {
-            cell.fillNum = null;
-          }
-        }
-      }
-      if (renderer) renderer.render(board);
-      console.log('[Debug] AI numbers hidden');
-    },
-  };
-
+  // === 调试工具集（已抽离到 core/DebugTools.js） ===
+  const DEBUG_TOOLS = DebugTools.create({
+    get board() { return board; },
+    get renderer() { return renderer; },
+    get GuideBattle() { return typeof GuideBattle !== 'undefined' ? GuideBattle : null; },
+    restartLevel: restartLevel,
+  });
   // 挂到window上，方便控制台直接调用
   global.DEBUG = DEBUG_TOOLS;
 
@@ -6042,346 +5390,30 @@
   global.__autoTestReady = true;
 
   // ============================================================
-  //  PC 双栏布局切换逻辑
+  //  PC 双栏布局切换逻辑（已抽离到 ui/PcLayoutManager.js）
   // ============================================================
 
-  let _isPcLayout = false;
-  // 暴露到全局供 UIManager / CharBubble 使用
-  Object.defineProperty(global, '_isPcLayout', {
-    get: function() { return _isPcLayout; },
-    configurable: true,
+  const pcLayoutManager = new PcLayoutManager({
+    get board() { return board; },
+    get renderer() { return renderer; },
+    UIManager: UIManager,
+    CharBubble: CharBubble,
+    log: log,
   });
-  let _layoutResizeTimer = null;
+  pcLayoutManager.initEventListeners();
 
-  /**
-   * 检测当前是否应该使用 PC 双栏布局
-   * 规则：宽度 >= 900px 且横屏
-   */
-  function _isPcLayoutActive() {
-    return window.innerWidth >= 900 && window.innerWidth > window.innerHeight;
-  }
-
-  /**
-   * 切换到 PC 双栏布局
-   * 将 canvas 从移动端容器移动到 PC 左侧战区
-   */
-  function _switchToPcLayout() {
-    if (_isPcLayout) return;
-
-    const canvas = document.getElementById('gameCanvas');
-    const longPressHalo = document.getElementById('long-press-halo');
-    const hintBubble = document.getElementById('hint-narration-bubble');
-    const comboUIContainer = document.getElementById('combo-ui-container');
-    const threeActIndicator = document.getElementById('three-act-indicator');
-    const climaxOverlay = document.getElementById('climax-overlay');
-    const pcBoardContainer = document.getElementById('pc-board-container');
-    const mobileBoardArea = document.getElementById('board-area');
-
-    if (!canvas || !pcBoardContainer) return;
-
-    // 移动 canvas 到 PC 左侧战区
-    pcBoardContainer.appendChild(canvas);
-    // 移动提示气泡到 PC 棋盘容器内
-    if (hintBubble) {
-      pcBoardContainer.appendChild(hintBubble);
-    }
-    // 移动连击UI到 PC 棋盘容器内
-    if (comboUIContainer) {
-      pcBoardContainer.appendChild(comboUIContainer);
-    }
-    // 移动三幕指示灯到 PC 棋盘容器内
-    if (threeActIndicator) {
-      pcBoardContainer.appendChild(threeActIndicator);
-    }
-    // 移动通关高潮动画到 PC 棋盘容器内（限制在棋盘区域）
-    if (climaxOverlay) {
-      pcBoardContainer.appendChild(climaxOverlay);
-    }
-    // 移动角色气泡到 PC 棋盘容器内（如果正在显示）
-    const bubbleEl = CharBubble.getElement();
-    if (bubbleEl && bubbleEl.parentNode) {
-      pcBoardContainer.appendChild(bubbleEl);
-    }
-    if (longPressHalo) {
-      longPressHalo.style.display = 'none';
-    }
-
-    // 标记 PC 布局已激活
-    _isPcLayout = true;
-    document.body.classList.add('pc-layout-active');
-
-    // 触发 renderer 重新计算尺寸
-    if (renderer && board) {
-      renderer.recalcCellSize(board);
-      renderer.render(board);
-    }
-
-    log.info('[Layout] 切换到 PC 双栏布局');
-  }
-
-  /**
-   * 切换到移动端布局
-   * 将 canvas 从 PC 容器移回移动端原位置
-   */
-  function _switchToMobileLayout() {
-    if (!_isPcLayout) return;
-
-    const canvas = document.getElementById('gameCanvas');
-    const longPressHalo = document.getElementById('long-press-halo');
-    const hintBubble = document.getElementById('hint-narration-bubble');
-    const comboUIContainer = document.getElementById('combo-ui-container');
-    const threeActIndicator = document.getElementById('three-act-indicator');
-    const climaxOverlay = document.getElementById('climax-overlay');
-    const pcBoardContainer = document.getElementById('pc-board-container');
-    const mobileBoardArea = document.getElementById('board-area');
-
-    if (!canvas || !mobileBoardArea) return;
-
-    // 移动 canvas 回移动端原位置（插入到 halo 之前）
-    if (longPressHalo) {
-      mobileBoardArea.insertBefore(canvas, longPressHalo);
-      longPressHalo.style.display = '';
-    } else {
-      mobileBoardArea.appendChild(canvas);
-    }
-    // 移动提示气泡回移动端棋盘区域
-    if (hintBubble) {
-      mobileBoardArea.appendChild(hintBubble);
-    }
-    // 移动连击UI回移动端棋盘区域
-    if (comboUIContainer) {
-      mobileBoardArea.appendChild(comboUIContainer);
-    }
-    // 移动三幕指示灯回移动端棋盘区域
-    if (threeActIndicator) {
-      mobileBoardArea.appendChild(threeActIndicator);
-    }
-    // 移动通关高潮动画回 body（全屏）
-    if (climaxOverlay) {
-      document.body.appendChild(climaxOverlay);
-    }
-    // 移动角色气泡回 body（如果正在显示）
-    const bubbleElMobile = CharBubble.getElement();
-    if (bubbleElMobile && bubbleElMobile.parentNode) {
-      document.body.appendChild(bubbleElMobile);
-    }
-
-    // 清除标记
-    _isPcLayout = false;
-    document.body.classList.remove('pc-layout-active');
-
-    // 触发 renderer 重新计算尺寸
-    if (renderer && board) {
-      renderer.recalcCellSize(board);
-      renderer.render(board);
-    }
-
-    log.info('[Layout] 切换到移动端布局');
-  }
-
-  /**
-   * 根据当前视口尺寸自动切换布局
-   */
-  function _updateLayout() {
-    const shouldBePc = _isPcLayoutActive();
-    if (shouldBePc && !_isPcLayout) {
-      _switchToPcLayout();
-    } else if (!shouldBePc && _isPcLayout) {
-      _switchToMobileLayout();
-    }
-  }
-
-  /**
-   * 同步 45法则 数据到 PC 端面板（转发到 UIManager）
-   */
-  function _syncRule45ToPc() { return UIManager._syncRule45ToPc(); }
-
-  /**
-   * 同步 What If 快照数据到 PC 端面板
-   */
-  function _syncWhatIfToPc() {
-    if (!_isPcLayout) return;
-
-    // 同步快照计数
-    const badge = document.getElementById('float-bar-tab-badge');
-    const pcCount = document.getElementById('pc-whatif-count');
-    if (pcCount) {
-      const count = badge && badge.style.display !== 'none' ? parseInt(badge.textContent) || 0 : 0;
-      pcCount.textContent = '分支 ' + count + '/3';
-    }
-
-    // 同步快照卡片（克隆移动端卡片）
-    const mobileCards = document.getElementById('snapshot-cards');
-    const pcCards = document.getElementById('pc-snapshot-cards');
-    if (mobileCards && pcCards) {
-      // 简单同步：克隆 DOM 结构
-      // （实际复杂同步在后续迭代中完善）
-    }
-  }
-
-  /**
-   * 同步计时器到 PC 面板
-   */
-  function _syncTimerToPc() {
-    if (!_isPcLayout) return;
-
-    const mobileTimer = document.getElementById('game-timer-display');
-    const pcTimer = document.getElementById('pc-timer-display');
-    if (mobileTimer && pcTimer) {
-      pcTimer.textContent = mobileTimer.textContent;
-    }
-  }
-
-  /**
-   * 同步提示次数到 PC 面板
-   */
-  function _syncHintsToPc(count) {
-    if (!_isPcLayout) return;
-
-    const pcHints = document.getElementById('pc-hints-left');
-    if (pcHints) {
-      pcHints.textContent = count !== undefined ? count : '—';
-    }
-  }
-
-  /**
-   * 初始化 PC 端按钮事件（复用现有移动端处理函数）
-   */
-  function _initPcButtons() {
-    // PC 端工具栏按钮 —— 点击时触发对应移动端按钮的点击事件
-    const buttonMappings = [
-      ['pc-btn-undo', 'btn-undo'],
-      ['pc-btn-erase', 'btn-erase'],
-      ['pc-btn-note', 'btn-note'],
-      ['pc-btn-whatif', 'btn-whatif'],
-      ['pc-btn-hint', 'btn-hint'],
-      ['pc-btn-dict', 'btn-tech-matrix'], // 字典按钮映射到技术矩阵
-    ];
-
-    buttonMappings.forEach(function(mapping) {
-      const pcBtn = document.getElementById(mapping[0]);
-      const mobileBtn = document.getElementById(mapping[1]);
-      if (pcBtn && mobileBtn) {
-        pcBtn.addEventListener('click', function(e) {
-          e.preventDefault();
-          mobileBtn.click();
-        });
-      }
-    });
-
-    // PC 端 What If 操作按钮
-    const whatIfMappings = [
-      ['pc-btn-whatif-accept', 'btn-whatif-accept'],
-      ['pc-btn-whatif-undo', 'btn-whatif-undo'],
-      ['pc-btn-whatif-reset', 'btn-whatif-reset'],
-    ];
-
-    whatIfMappings.forEach(function(mapping) {
-      const pcBtn = document.getElementById(mapping[0]);
-      const mobileBtn = document.getElementById(mapping[1]);
-      if (pcBtn && mobileBtn) {
-        pcBtn.addEventListener('click', function(e) {
-          e.preventDefault();
-          mobileBtn.click();
-        });
-      }
-    });
-
-    // PC 端数字键盘 —— 点击时触发对应移动端数字按钮
-    const pcNumButtons = document.querySelectorAll('#pc-num-pad .num-btn');
-    pcNumButtons.forEach(function(pcBtn) {
-      const num = pcBtn.getAttribute('data-num');
-      pcBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        const mobileBtn = document.querySelector('#num-pad .num-btn[data-num="' + num + '"]');
-        if (mobileBtn) mobileBtn.click();
-      });
-    });
-  }
-
-  /**
-   * 同步工具栏按钮激活状态到 PC 端
-   */
-  function _syncToolbarState() {
-    if (!_isPcLayout) return;
-
-    const stateMappings = [
-      ['btn-note', 'pc-btn-note'],
-      ['btn-whatif', 'pc-btn-whatif'],
-    ];
-
-    stateMappings.forEach(function(mapping) {
-      const mobileBtn = document.getElementById(mapping[0]);
-      const pcBtn = document.getElementById(mapping[1]);
-      if (mobileBtn && pcBtn) {
-        if (mobileBtn.classList.contains('active')) {
-          pcBtn.classList.add('active');
-        } else {
-          pcBtn.classList.remove('active');
-        }
-      }
-    });
-  }
-
-  /**
-   * 同步数字键盘状态到 PC 端
-   */
-  function _syncNumPadState() {
-    if (!_isPcLayout) return;
-
-    const mobileBtns = document.querySelectorAll('#num-pad .num-btn');
-    mobileBtns.forEach(function(mobileBtn) {
-      const num = mobileBtn.getAttribute('data-num');
-      const pcBtn = document.querySelector('#pc-num-pad .num-btn[data-num="' + num + '"]');
-      if (pcBtn) {
-        // 同步 active/completed 状态
-        pcBtn.classList.toggle('active', mobileBtn.classList.contains('active'));
-        pcBtn.classList.toggle('completed', mobileBtn.classList.contains('completed'));
-        pcBtn.classList.toggle('quick-fill-num', mobileBtn.classList.contains('quick-fill-num'));
-        pcBtn.classList.toggle('long-pressing', mobileBtn.classList.contains('long-pressing'));
-        // 同步数字计数
-        const mobileCount = mobileBtn.querySelector('.num-count');
-        const pcCount = pcBtn.querySelector('.num-count');
-        if (mobileCount && pcCount) {
-          pcCount.textContent = mobileCount.textContent;
-        }
-      }
-    });
-  }
-
-  // 监听 resize 事件，防抖处理布局切换
-  window.addEventListener('resize', function() {
-    if (_layoutResizeTimer) {
-      clearTimeout(_layoutResizeTimer);
-    }
-    _layoutResizeTimer = setTimeout(function() {
-      _updateLayout();
-      // 布局切换后重新计算 canvas 尺寸
-      if (renderer && board) {
-        renderer.recalcCellSize(board);
-        renderer.render(board);
-      }
-    }, 150);
-  });
-
-  // 监听 orientationchange
-  window.addEventListener('orientationchange', function() {
-    setTimeout(function() {
-      _updateLayout();
-      if (renderer && board) {
-        renderer.recalcCellSize(board);
-        renderer.render(board);
-      }
-    }, 200);
-  });
-
-  // 页面加载后初始化布局检测
-  document.addEventListener('DOMContentLoaded', function() {
-    // 初始化 PC 端按钮事件
-    _initPcButtons();
-    // 检测初始布局
-    _updateLayout();
-  });
+  // 向后兼容：转发函数
+  function _isPcLayoutActive() { return pcLayoutManager.isPcLayoutActive(); }
+  function _switchToPcLayout() { return pcLayoutManager.switchToPcLayout(); }
+  function _switchToMobileLayout() { return pcLayoutManager.switchToMobileLayout(); }
+  function _updateLayout() { return pcLayoutManager.updateLayout(); }
+  function _syncRule45ToPc() { return pcLayoutManager.syncRule45ToPc(); }
+  function _syncWhatIfToPc() { return pcLayoutManager.syncWhatIfToPc(); }
+  function _syncTimerToPc() { return pcLayoutManager.syncTimerToPc(); }
+  function _syncHintsToPc(count) { return pcLayoutManager.syncHintsToPc(count); }
+  function _initPcButtons() { return pcLayoutManager.initPcButtons(); }
+  function _syncToolbarState() { return pcLayoutManager.syncToolbarState(); }
+  function _syncNumPadState() { return pcLayoutManager.syncNumPadState(); }
 
   // 暴露到全局供外部调用
   global.updatePcLayout = _updateLayout;
@@ -6391,6 +5423,6 @@
   global.syncNumPadStateToPc = _syncNumPadState;
   global.syncTimerToPc = _syncTimerToPc;
   global.syncHintsToPc = _syncHintsToPc;
-  global.isPcLayout = function() { return _isPcLayout; };
+  global.isPcLayout = function() { return pcLayoutManager.isPcLayout(); };
 
 })(window);
