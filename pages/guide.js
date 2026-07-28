@@ -24,6 +24,10 @@
   const EndingManager = window.EndingManager;
   const ExpertCharacterHandler = window.ExpertCharacterHandler;
   const CellInputHandler = window.CellInputHandler;
+  const EventBinder = window.EventBinder;
+
+  // === 第十阶段抽离：EventBinder 事件绑定器 ===
+  let eventBinder = null;
 
   // === 第九阶段抽离：GameContext 中央状态和 CellInputHandler 核心输入 ===
   // GameContext 通过 initGameContext() 初始化并挂到 window.GameContext
@@ -104,7 +108,15 @@
 
   // 开发调试模式
   let _debugMode = false;
-  let _heatmapVisible = false; // 热力图是否显示（仅调试用）
+
+  // === 第八阶段抽离：热力图管理器 ===
+  let heatmapManager = null;
+
+  // === 第八阶段抽离：技巧图鉴 ===
+  let techniqueEncyclopedia = null;
+
+  // === 第八阶段抽离：关卡特性应用器 ===
+  let levelFeatureApplier = null;
 
   // UI elements to hide during story
   const UI_SELECTORS = ['#game-container', '#num-pad', '#toolbar'];
@@ -682,6 +694,43 @@
       });
     }
 
+    // === 第八阶段抽离：初始化热力图管理器 ===
+    if (HeatmapManager && !heatmapManager) {
+      heatmapManager = new HeatmapManager({
+        getBoard: () => board,
+        getRenderer: () => renderer,
+        getCurrentLevelData: () => currentLevelData,
+        getCurrentLevelId: () => currentLevelId,
+        isLastLevelOfChapter: isLastLevelOfChapter,
+        showToast: showToast,
+        log: log,
+      });
+    }
+
+    // === 第八阶段抽离：初始化技巧图鉴 ===
+    if (TechniqueEncyclopedia && !techniqueEncyclopedia) {
+      techniqueEncyclopedia = new TechniqueEncyclopedia({
+        getTeachingSystem: () => global.guideTeachingSystem,
+        onVisibilityChange: (visible) => {
+          EventLogger.log('game:techniques', { visible: visible });
+        },
+      });
+    }
+
+    // === 第八阶段抽离：初始化关卡特性应用器 ===
+    if (LevelFeatureApplier && !levelFeatureApplier) {
+      levelFeatureApplier = new LevelFeatureApplier({
+        getCurrentLevelData: () => currentLevelData,
+        getCurrentLevelId: () => currentLevelId,
+        getRenderer: () => renderer,
+        getBoard: () => board,
+        getSettingsPanel: () => settingsPanel,
+        getNoteMode: () => noteMode,
+        setNoteMode: (v) => { noteMode = v; },
+        updateNoteButtonState: updateNoteButtonState,
+      });
+    }
+
     gameController = new GameController({
       // 系统对象
       LevelLoader: LevelLoader,
@@ -1042,80 +1091,19 @@
   // === UI Visibility (转发到 UIManager) ===
   function setUIVisible(visible) { return UIManager.setUIVisible(visible); }
 
-  // === Pristine Heatmap Preload ===
-  /**
-   * 预加载初始热力图到 WinConditionManager 缓存
-   * 使用 TechRaterAdapter 生成，延迟一帧执行避免阻塞 UI 渲染
-   */
-  function _preloadPristineHeatmap() {
-    if (!board || !currentLevelData) return;
-    if (typeof WinConditionManager === 'undefined') return;
-    if (typeof TechRaterAdapter === 'undefined') return;
+  // ============================================================
+  //  热力图管理（第八阶段抽离至 game/HeatmapManager.js）
+  // ============================================================
+  //  向后兼容：所有热力图函数转发到 heatmapManager 实例
 
-    // 延迟到下一帧执行，避免阻塞初始渲染
-    requestAnimationFrame(() => {
-      // 再延迟一帧，确保 UI 完全渲染
-      requestAnimationFrame(() => {
-        try {
-          // 用 WinConditionManager 的 getPristineHeatmap 生成并缓存
-          // 它内部有缓存机制，同一关卡只会生成一次
-          const isBoss = typeof isLastLevelOfChapter === 'function' ? isLastLevelOfChapter() : false;
-          const heatmap = WinConditionManager.getPristineHeatmap(board, currentLevelData, isBoss);
-          if (heatmap) {
-            log.info('[Heatmap] 初始热力图预加载完成:', currentLevelId);
-            // 设置到 renderer 并启用三色显示
-            if (renderer && typeof renderer.setHeatmapData === 'function') {
-              renderer.setHeatmapData(heatmap);
-              // 启用热力图
-              // 如果启用了三幕引导，默认第一幕（simple）模式；否则全显
-              const threeActEnabled = currentLevelData.features &&
-                currentLevelData.features.threeActGuide === true;
-              renderer.setHeatmapEnabled(true, 0.15);
-              renderer.setThreeActMode(threeActEnabled ? 'simple' : 'all');
-              renderer.render(board);
-            }
-          }
-        } catch (e) {
-          log.warn('[Heatmap] 预加载初始热力图失败:', e);
-        }
-      });
-    });
+  function _preloadPristineHeatmap() {
+    if (!heatmapManager) return;
+    heatmapManager.preloadPristineHeatmap();
   }
 
-  /**
-   * 切换热力图显示（调试用）
-   * 仅在 debug 模式下可用，通过 Shift+H 触发
-   */
   function _toggleHeatmapDisplay() {
-    if (!renderer) return;
-    if (typeof renderer.setHeatmapEnabled !== 'function') return;
-
-    _heatmapVisible = !_heatmapVisible;
-
-    if (_heatmapVisible) {
-      // 如果还没有热力图数据，尝试获取
-      if (!renderer._heatmapData) {
-        try {
-          const isBoss = typeof isLastLevelOfChapter === 'function' ? isLastLevelOfChapter() : false;
-          const heatmap = WinConditionManager.getPristineHeatmap(board, currentLevelData, isBoss);
-          if (heatmap) {
-            renderer.setHeatmapData(heatmap);
-          }
-        } catch (e) {
-          log.warn('[Heatmap] 获取热力图数据失败:', e);
-        }
-      }
-      renderer.setHeatmapEnabled(true, 0.4);
-      showToast('热力图：开');
-    } else {
-      renderer.setHeatmapEnabled(false);
-      showToast('热力图：关');
-    }
-
-    // 触发重绘
-    if (renderer && board) {
-      renderer.render(board);
-    }
+    if (!heatmapManager) return;
+    heatmapManager.toggleDisplay();
   }
 
   // === Board Init ===
@@ -1160,93 +1148,127 @@
     return result;
   }
 
-  // === Apply Level Features (渐进式功能解锁) ===
+  // ============================================================
+  //  关卡特性应用（第八阶段抽离至 game/LevelFeatureApplier.js）
+  // ============================================================
+  //  向后兼容：转发到 levelFeatureApplier 实例
+
   function applyLevelFeatures() {
-    if (!currentLevelData || !currentLevelData.features) return;
-    const f = currentLevelData.features;
-
-    // 1. 控制工具栏按钮显隐
-    // 笔记按钮
-    const btnNote = document.getElementById('btn-note');
-    if (btnNote) {
-      if (f.allowDraft === false) {
-        btnNote.style.display = 'none';
-        // 隐藏时退出笔记模式
-        if (noteMode) {
-          noteMode = false;
-          updateNoteButtonState();
-        }
-      } else {
-        btnNote.style.display = '';
-      }
-    }
-
-    // 提示按钮
-    const btnHint = document.getElementById('btn-hint');
-    if (btnHint) {
-      btnHint.style.display = (f.showHints === false) ? 'none' : '';
-    }
-
-    // 45法则按钮（201关起解锁）
-    const btnRule45 = document.getElementById('btn-rule45');
-    if (btnRule45) {
-      const levelIdNum = parseInt(currentLevelId);
-      const rule45Unlocked = levelIdNum >= 201;
-      if (f.assistant45 === false || !rule45Unlocked) {
-        btnRule45.style.display = 'none';
-      } else {
-        btnRule45.style.display = '';
-      }
-    }
-
-    // 2. 控制高亮（调用 renderer.setHighlightOptions）
-    if (renderer && typeof renderer.setHighlightOptions === 'function') {
-      renderer.setHighlightOptions({
-        highlightRow: f.highlightRow !== false,
-        highlightCol: f.highlightCol !== false,
-        highlightBox: f.highlightBox !== false,
-        highlightNumber: f.highlightNumber !== false,
-        highlightCage: f.highlightCage !== false,
-      });
-    }
-
-    // 3. 控制自动填充候选数（受全局设置控制，默认关闭）
-    // 忽略关卡级 autoFillCandidates 特性，统一由玩家在设置中手动开启
-    const shouldAutoFill = settingsPanel && settingsPanel.get
-      ? settingsPanel.get('game.autoFillCandidates')
-      : false;
-
-    if (shouldAutoFill === true) {
-      const noteSys = window.gameNoteSystem || global.guideNoteSystem;
-      if (noteSys) {
-        if (typeof noteSys._autoFillTheoreticalCandidates === 'function') {
-          noteSys._autoFillTheoreticalCandidates();
-        } else if (typeof noteSys.autoFill === 'function') {
-          noteSys.autoFill();
-        }
-      } else if (board && typeof board.autoFillCandidates === 'function') {
-        board.autoFillCandidates();
-      } else if (typeof autoFillCandidates === 'function') {
-        autoFillCandidates();
-      }
-      // 触发重绘
-      if (renderer) {
-        renderer.forceRender = true;
-        renderer.render(board);
-      }
-    }
+    if (!levelFeatureApplier) return;
+    levelFeatureApplier.apply();
   }
 
-  // === Event Binding ===
-  let eventsBound = false; // 防止重复绑定
+  // === Event Binding（已迁移到 core/EventBinder.js）===
+  // 向后兼容：转发到 eventBinder 实例
   function bindEvents() {
-    if (eventsBound) return; // 只绑定一次
-    eventsBound = true;
+    if (eventBinder && eventBinder.isBound) return;
+    if (!EventBinder) return;
 
-    const canvas = document.getElementById('gameCanvas');
+    eventBinder = new EventBinder({
+      // 核心对象
+      board: board,
+      renderer: renderer,
+      storyEngine: storyEngine,
+      techMatrix: techMatrix,
+      comboSystem: comboSystem,
+      expertSystem: expertSystem,
+      hintSystem: hintSystem,
+      comedySystem: comedySystem,
+      settingsPanel: settingsPanel,
+      achievementCoordinator: achievementCoordinator,
+      AudioService: AudioService,
+      VIBRATE_PRESETS: VIBRATE_PRESETS,
+      WhatIfState: WhatIfState,
+      HintPlayerState: HintPlayerState,
+      lessonUICoordinator: lessonUICoordinator,
+      chapterSelect: chapterSelect,
+      currentLevelData: currentLevelData,
 
-    // --- 初始化 InputRouter 并绑定输入事件 ---
-    inputRouter = new InputRouter({
+      // 状态 getter / setter
+      getIsCompleted: () => isCompleted,
+      getIsPaused: () => isPaused,
+      getNoteMode: () => noteMode,
+      setNoteMode: (v) => { noteMode = v; },
+      getDebugMode: () => _debugMode,
+      getTechniquePanelVisible: () => _techniquePanelVisible,
+      getUsedNotes: () => usedNotes,
+      setUsedNotes: (v) => { usedNotes = v; },
+      getErrorCount: () => errorCount,
+      incErrorCount: () => { errorCount++; },
+      getSolution: () => currentLevelData?.solution,
+
+      // 业务回调 - 核心输入（InputRouter 用）
+      onNumberInput: handleNumberInput,
+      onErase: handleErase,
+      onToggleNote: toggleNoteMode,
+      onHint: showHint,
+      onWhatIfToggle: toggleWhatIfMode,
+      onUndo: undo,
+      onPauseToggle: togglePause,
+      onSkipHintStep: skipHintStep,
+      onBoardLongPress: handleBoardLongPress,
+      onUpdateMultiSelectHint: updateMultiSelectHint,
+      onUpdateNoteButtonState: updateNoteButtonState,
+      onUpdateRule45Banner: updateRule45Banner,
+      onShowToast: showToast,
+      onVibrate: vibrate,
+      onEnterWhatIf: enterWhatIfMode,
+      onExitWhatIf: exitWhatIfMode,
+      onAdoptWhatIf: adoptWhatIfChanges,
+      onUndoWhatIfStep: undoWhatIfStep,
+      onToggleRule45Banner: toggleRule45Banner,
+      onCheckBoardAnswer: checkBoardAnswer,
+      onAutoFillCandidates: autoFillCandidates,
+      onAdjustSelectedNumber: adjustSelectedNumber,
+      onToggleTechniqueEncyclopedia: toggleTechniqueEncyclopedia,
+      onHideTechniqueEncyclopedia: hideTechniqueEncyclopedia,
+      onToggleHeatmapDisplay: _toggleHeatmapDisplay,
+      onUpdateNumBtnActiveState: updateNumBtnActiveState,
+      onUpdateNumBtnCompletedState: updateNumBtnCompletedState,
+
+      // 业务回调 - UI操作
+      showToast: showToast,
+      vibrate: vibrate,
+      toggleNoteMode: toggleNoteMode,
+      undo: undo,
+      eraseCell: eraseCell,
+      showHint: showHint,
+      toggleWhatIfMode: toggleWhatIfMode,
+      adoptWhatIfChanges: adoptWhatIfChanges,
+      undoWhatIfStep: undoWhatIfStep,
+      resetWhatIfToRoot: resetWhatIfToRoot,
+      exitWhatIfMode: exitWhatIfMode,
+      toggleFloatBarPanel: toggleFloatBarPanel,
+      toggleTechniqueEncyclopedia: toggleTechniqueEncyclopedia,
+      togglePause: togglePause,
+      showPauseMenu: showPauseMenu,
+      restartLevel: restartLevel,
+      goToChapterSelect: goToChapterSelect,
+      goToMainMenu: goToMainMenu,
+
+      // 业务回调 - WhatIf辅助
+      hasChangesFromRoot: _hasChangesFromRoot,
+
+      // 业务回调 - CellInputHandler 专用
+      validateBoard: validateBoard,
+      highlightAllErrors: highlightAllErrors,
+      checkCompletion: checkCompletion,
+      addWhatIfSnapshot: addWhatIfSnapshot,
+      lessonHandleCellFill: _lessonHandleCellFill,
+      detectTechniqueForFill: detectTechniqueForFill,
+      recordTechniqueUsage: recordTechniqueUsage,
+    });
+
+    eventBinder.bind();
+
+    // 向后兼容：同步 inputRouter 和 cellInputHandler 引用
+    inputRouter = eventBinder.getInputRouter();
+    cellInputHandler = eventBinder.getCellInputHandler();
+  }
+
+  // （原 bindEvents 函数体已迁移到 core/EventBinder.js）
+  // 通过 eventBinder.bind() 执行所有事件绑定
+  /*
       board: board,
       renderer: renderer,
       storyEngine: storyEngine,
@@ -1268,7 +1290,7 @@
       getNoteMode: () => noteMode,
       setNoteMode: (v) => { noteMode = v; },
       getDebugMode: () => _debugMode,
-      getTechniquePanelVisible: () => _techniquePanelVisible,
+      getTechniquePanelVisible: () => techniqueEncyclopedia ? techniqueEncyclopedia.isVisible() : false,
       setUsedNotes: (v) => { usedNotes = v; },
 
       // 业务回调
@@ -2314,165 +2336,24 @@
     }
   }
 
-  // === Technique Encyclopedia ===
-  let _techniquePanelEl = null;
-  let _techniquePanelVisible = false;
+  // ============================================================
+  //  技巧图鉴（第八阶段抽离至 ui/TechniqueEncyclopedia.js）
+  // ============================================================
+  //  向后兼容：所有技巧图鉴函数转发到 techniqueEncyclopedia 实例
 
   function toggleTechniqueEncyclopedia() {
-    if (_techniquePanelVisible) {
-      hideTechniqueEncyclopedia();
-    } else {
-      showTechniqueEncyclopedia();
-    }
+    if (!techniqueEncyclopedia) return;
+    techniqueEncyclopedia.toggle();
   }
 
   function showTechniqueEncyclopedia() {
-    if (_techniquePanelVisible) return;
-    _techniquePanelVisible = true;
-
-    // Get teaching system data
-    const teachingSys = global.guideTeachingSystem;
-    const learned = teachingSys ? teachingSys.getLearnedTechniques() : [];
-    const allTechniques = teachingSys ? teachingSys.getAllTechniques() : [];
-
-    // Create panel
-    const panel = document.createElement('div');
-    panel.id = 'technique-encyclopedia';
-    _techniquePanelEl = panel;
-
-    panel.style.cssText =
-      'position:fixed;top:0;right:0;width:100%;max-width:420px;height:100%;' +
-      'background:rgba(15,23,42,0.98);' +
-      'border-left:1px solid rgba(251,191,36,0.3);' +
-      'z-index:20000;' +
-      'transform:translateX(100%);' +
-      'transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);' +
-      'display:flex;flex-direction:column;' +
-      'backdrop-filter:blur(12px);';
-
-    // Category labels
-    const categoryNames = {
-      basic: '基础技巧',
-      intermediate: '进阶技巧',
-      killer: '杀手数独',
-    };
-
-    // Mastery labels
-    const masteryLabels = ['未学习', '初次见面', '略有印象', '基本掌握', '熟练运用', '融会贯通'];
-    const masteryColors = ['#64748b', '#94a3b8', '#3b82f6', '#22c55e', '#f59e0b', '#fbbf24'];
-
-    // Build technique list
-    let techniquesHTML = '';
-    const categories = { basic: [], intermediate: [], killer: [] };
-
-    if (teachingSys) {
-      for (const techId of allTechniques) {
-        const info = teachingSys.getTechniqueInfo(techId);
-        if (info && categories[info.category]) {
-          categories[info.category].push(info);
-        }
-      }
-    }
-
-    for (const [cat, list] of Object.entries(categories)) {
-      if (list.length === 0) continue;
-      techniquesHTML +=
-        '<div style="margin-bottom:20px;">' +
-        '<div style="font-size:11px;color:#fbbf24;letter-spacing:3px;margin-bottom:8px;padding-left:4px;">' +
-        (categoryNames[cat] || cat) + '</div>';
-      for (const tech of list) {
-        const level = tech.masteryLevel || 0;
-        const pct = Math.min(100, level * 20);
-        const isLocked = !tech.learned;
-        techniquesHTML +=
-          '<div style="' +
-            'background:rgba(30,41,59,0.8);' +
-            'border:1px solid ' + (isLocked ? 'rgba(100,116,139,0.2)' : 'rgba(251,191,36,0.2)') + ';' +
-            'border-radius:10px;' +
-            'padding:12px;' +
-            'margin-bottom:8px;' +
-            'opacity:' + (isLocked ? '0.5' : '1') + ';' +
-          '">' +
-            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
-              '<span style="font-size:14px;font-weight:700;color:' + (isLocked ? '#64748b' : '#fef3c7') + ';">' +
-                (isLocked ? '🔒 ' + '???' : tech.name) + '</span>' +
-              '<span style="font-size:10px;color:' + masteryColors[level] + ';letter-spacing:1px;">' +
-                masteryLabels[level] + '</span>' +
-            '</div>' +
-            '<div style="font-size:11px;color:#94a3b8;line-height:1.5;margin-bottom:8px;">' +
-              (isLocked ? '尚未发现此技巧' : tech.description) +
-            '</div>' +
-            (isLocked ? '' :
-              '<div style="height:4px;background:rgba(100,116,139,0.2);border-radius:2px;overflow:hidden;">' +
-                '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,' + masteryColors[level] + ',' + masteryColors[Math.min(5, level + 1)] + ');border-radius:2px;transition:width 0.3s;"></div>' +
-              '</div>' +
-              '<div style="font-size:9px;color:#64748b;margin-top:4px;text-align:right;">' +
-                '遇见 ' + tech.encounterCount + ' 次 · 正确 ' + (tech.correctCount || 0) + ' 次' +
-              '</div>'
-            ) +
-          '</div>';
-      }
-      techniquesHTML += '</div>';
-    }
-
-    if (learned.length === 0 && allTechniques.length === 0) {
-      techniquesHTML =
-        '<div style="text-align:center;color:#64748b;padding:40px 20px;">' +
-        '<div style="font-size:48px;margin-bottom:16px;">📖</div>' +
-        '<div style="font-size:14px;">教学系统未加载</div>' +
-        '</div>';
-    } else if (learned.length === 0) {
-      techniquesHTML =
-        '<div style="text-align:center;color:#64748b;padding:40px 20px;">' +
-        '<div style="font-size:48px;margin-bottom:16px;">🔍</div>' +
-        '<div style="font-size:14px;margin-bottom:8px;">还没有发现任何技巧</div>' +
-        '<div style="font-size:11px;">点击提示按钮，在解谜中学习新技巧吧！</div>' +
-        '</div>';
-    }
-
-    panel.innerHTML =
-      // Header
-      '<div style="padding:20px 20px 16px;border-bottom:1px solid rgba(251,191,36,0.2);display:flex;align-items:center;justify-content:space-between;">' +
-        '<div>' +
-          '<div style="font-size:18px;font-weight:900;color:#fef3c7;letter-spacing:2px;">📖 技巧图鉴</div>' +
-          '<div style="font-size:11px;color:#94a3b8;margin-top:4px;">' +
-            '已掌握 ' + learned.length + ' / ' + allTechniques.length + ' 种技巧' +
-          '</div>' +
-        '</div>' +
-        '<div id="tech-panel-close" style="font-size:20px;color:#64748b;cursor:pointer;padding:4px 8px;" title="关闭">✕</div>' +
-      '</div>' +
-      // Content
-      '<div style="flex:1;overflow-y:auto;padding:16px 20px;">' +
-        techniquesHTML +
-      '</div>';
-
-    document.body.appendChild(panel);
-
-    // Animate in
-    requestAnimationFrame(() => {
-      panel.style.transform = 'translateX(0)';
-    });
-
-    // Close button
-    panel.querySelector('#tech-panel-close').addEventListener('click', () => {
-      hideTechniqueEncyclopedia();
-    });
-
-    EventLogger.log('game:techniques', { visible: true });
+    if (!techniqueEncyclopedia) return;
+    techniqueEncyclopedia.show();
   }
 
   function hideTechniqueEncyclopedia() {
-    if (!_techniquePanelVisible || !_techniquePanelEl) return;
-    _techniquePanelVisible = false;
-
-    const panel = _techniquePanelEl;
-    panel.style.transform = 'translateX(100%)';
-    setTimeout(() => {
-      if (panel.parentNode) panel.remove();
-    }, 300);
-    _techniquePanelEl = null;
-
-    EventLogger.log('game:techniques', { visible: false });
+    if (!techniqueEncyclopedia) return;
+    techniqueEncyclopedia.hide();
   }
 
   // === Hint Limit (per cycle) ===
