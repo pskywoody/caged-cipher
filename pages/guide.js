@@ -2990,8 +2990,13 @@
   let activeNumber = null; // 长按数字键激活的数字
   let eventsBound = false; // 防止重复绑定
 
+  // P0触控优化：输入状态锁 —— 防止连点导致历史记录错乱
+  let _isProcessingInput = false;
+  function _beginProcessing() { _isProcessingInput = true; }
+  function _endProcessing() { _isProcessingInput = false; }
+
   // 移动端触控优化
-  const EDGE_DEAD_ZONE = 8; // 边缘死区（像素）
+  const EDGE_DEAD_ZONE = 4; // 屏幕边缘死区（像素）——仅用于防止系统边缘手势冲突，不影响格子热区
   let _swipeStartPos = null; // 滑动起始位置 {x, y, time}
   const SWIPE_FAST_THRESHOLD_MS = 200; // 快速滑动时间阈值
   const SWIPE_DISTANCE_THRESHOLD = 30; // 滑动距离阈值（判定为滑动而非点击）
@@ -3011,13 +3016,16 @@
       canvas.addEventListener('pointerleave', onCanvasPointerUp);
     }
 
-    // --- Number pad 交互 ---
-    document.querySelectorAll('.num-btn').forEach(btn => {
-      btn.addEventListener('pointerdown', onNumBtnPointerDown);
-      btn.addEventListener('pointermove', onNumBtnPointerMove);
-      btn.addEventListener('pointerup', onNumBtnPointerUp);
-      btn.addEventListener('pointercancel', onNumBtnPointerUp);
-      btn.addEventListener('pointerleave', onNumBtnPointerLeave);
+    // --- Number pad 交互（事件代理模式，减少监听器数量）---
+    // P0优化：从每个按钮5个监听器（共90个）减少到2个面板各5个（共10个）
+    ['num-pad', 'pc-num-pad'].forEach(padId => {
+      const pad = document.getElementById(padId);
+      if (!pad) return;
+      pad.addEventListener('pointerdown', onNumPadPointerDown);
+      pad.addEventListener('pointermove', onNumPadPointerMove);
+      pad.addEventListener('pointerup', onNumPadPointerUp);
+      pad.addEventListener('pointercancel', onNumPadPointerUp);
+      pad.addEventListener('pointerleave', onNumPadPointerLeave);
     });
 
     // --- Keyboard ---
@@ -3035,6 +3043,10 @@
     // Window resize
     window.addEventListener('resize', () => {
       if (renderer && board) {
+        // P2优化：resize时失效尺寸缓存
+        if (typeof renderer.invalidateSizeCache === 'function') {
+          renderer.invalidateSizeCache();
+        }
         renderer.recalcCellSize(board);
         renderer.render(board);
       }
@@ -3045,6 +3057,10 @@
       // 延迟等待布局完成后重新计算
       setTimeout(() => {
         if (renderer && board) {
+          // P2优化：方向变化时失效尺寸缓存
+          if (typeof renderer.invalidateSizeCache === 'function') {
+            renderer.invalidateSizeCache();
+          }
           renderer.recalcCellSize(board);
           renderer.render(board);
         }
@@ -3099,7 +3115,57 @@
 
     // Toolbar buttons
     document.getElementById('btn-undo')?.addEventListener('click', () => { AudioService.sfx.play('click'); undo(); });
-    document.getElementById('btn-erase')?.addEventListener('click', () => { AudioService.sfx.play('click'); eraseCell(); });
+    // 擦除按钮：单击=擦除当前格，长按=笔记模式下清空所有笔记
+    (function setupEraseButton() {
+      const btn = document.getElementById('btn-erase');
+      if (!btn) return;
+      let eraseLongPressTimer = null;
+      let eraseLongPressTriggered = false;
+      btn.addEventListener('pointerdown', (e) => {
+        if (storyEngine && storyEngine._isPlaying) return;
+        if (isCompleted) return;
+        e.preventDefault();
+        eraseLongPressTriggered = false;
+        btn.classList.add('long-pressing');
+        eraseLongPressTimer = setTimeout(() => {
+          eraseLongPressTriggered = true;
+          btn.classList.remove('long-pressing');
+          // 长按擦除
+          if (noteMode) {
+            // 笔记模式：清除所有候选数
+            if (board && typeof board.clearAllCandidates === 'function') {
+              board.clearAllCandidates();
+              renderer.render(board);
+              AudioService.sfx.play('erase');
+              if (navigator.vibrate) navigator.vibrate([10, 20, 10]);
+              showToast('已清除所有笔记', 1000);
+            }
+          } else {
+            // 正常模式：与单击相同（擦除当前格）
+            eraseCell();
+          }
+        }, 500);
+      });
+      btn.addEventListener('pointerup', (e) => {
+        if (eraseLongPressTimer) {
+          clearTimeout(eraseLongPressTimer);
+          eraseLongPressTimer = null;
+        }
+        btn.classList.remove('long-pressing');
+        if (!eraseLongPressTriggered) {
+          // 短按：普通擦除
+          AudioService.sfx.play('click');
+          eraseCell();
+        }
+      });
+      btn.addEventListener('pointerleave', () => {
+        if (eraseLongPressTimer) {
+          clearTimeout(eraseLongPressTimer);
+          eraseLongPressTimer = null;
+        }
+        btn.classList.remove('long-pressing');
+      });
+    })();
     document.getElementById('btn-hint')?.addEventListener('click', () => { AudioService.sfx.play('click'); showHint(); });
     document.getElementById('btn-whatif')?.addEventListener('click', () => {
       AudioService.sfx.play('click');
@@ -3230,6 +3296,10 @@
   }
 
   // === Canvas Pointer Handlers ===
+  // P0触控优化：最小热区44px，格子边缘6px触摸溢出
+  const MIN_TOUCH_TARGET = 44; // 最小触控目标尺寸（px）
+  const EDGE_TOUCH_OVERFLOW = 6; // 格子边缘触摸溢出（px）
+
   function getCellFromEvent(e) {
     const canvas = document.getElementById('gameCanvas');
     if (!canvas || !renderer || !board) return null;
@@ -3259,8 +3329,55 @@
     const renderX = x / scaleX;
     const renderY = y / scaleY;
     
-    const col = Math.floor((renderX - renderer.paddingLeft) / renderer.cellSize);
-    const row = Math.floor((renderY - renderer.paddingTop) / renderer.cellSize);
+    const cs = renderer.cellSize;
+    const padL = renderer.paddingLeft;
+    const padT = renderer.paddingTop;
+    
+    // P0触控优化：热区扩展
+    // 1. 计算相对棋盘区域的坐标
+    const relX = renderX - padL;
+    const relY = renderY - padT;
+    
+    // 2. 初步计算格子索引（棋盘内部使用标准floor计算）
+    let col = Math.floor(relX / cs);
+    let row = Math.floor(relY / cs);
+    
+    // 3. 棋盘外边缘溢出扩展 + 最小44px热区修正
+    // 将溢出量和最小热区余量换算到渲染坐标系
+    const overflowX = EDGE_TOUCH_OVERFLOW / scaleX;
+    const overflowY = EDGE_TOUCH_OVERFLOW / scaleY;
+    const minTarget = MIN_TOUCH_TARGET / Math.min(scaleX, scaleY);
+    
+    // 边缘格子向外扩展量：取6px溢出和44px最小热区补足中的较大值
+    const expandX = Math.max(overflowX, (minTarget - cs) / 2);
+    const expandY = Math.max(overflowY, (minTarget - cs) / 2);
+    
+    const boardLeft = padL;
+    const boardTop = padT;
+    const boardRight = padL + board.size * cs;
+    const boardBottom = padT + board.size * cs;
+    
+    // 左边缘溢出：点在棋盘左外侧，但在expandX范围内
+    if (renderX >= boardLeft - expandX && renderX < boardLeft) {
+      col = 0;
+      // 行坐标用正常计算（可能在范围内或需要边缘修正）
+      if (row < 0 && renderY >= boardTop - expandY && renderY < boardTop) row = 0;
+      if (row >= board.size && renderY >= boardBottom && renderY <= boardBottom + expandY) row = board.size - 1;
+    }
+    // 右边缘溢出
+    else if (renderX > boardRight && renderX <= boardRight + expandX) {
+      col = board.size - 1;
+      if (row < 0 && renderY >= boardTop - expandY && renderY < boardTop) row = 0;
+      if (row >= board.size && renderY >= boardBottom && renderY <= boardBottom + expandY) row = board.size - 1;
+    }
+    // 上边缘溢出（列已在范围内）
+    else if (renderY >= boardTop - expandY && renderY < boardTop && col >= 0 && col < board.size) {
+      row = 0;
+    }
+    // 下边缘溢出（列已在范围内）
+    else if (renderY > boardBottom && renderY <= boardBottom + expandY && col >= 0 && col < board.size) {
+      row = board.size - 1;
+    }
     
     if (row >= 0 && row < board.size && col >= 0 && col < board.size) {
       return { r: row, c: col };
@@ -3271,6 +3388,7 @@
   function onCanvasPointerDown(e) {
     if (storyEngine && storyEngine._isPlaying) return;
     if (isCompleted) return;
+    if (_isProcessingInput) return; // 状态锁
     e.preventDefault();
 
     // === 提示动画：点击跳过当前步 ===
@@ -3338,12 +3456,15 @@
 
     // 如果处于连填模式，直接填入数字
     if (quickFillMode && quickFillNum !== null) {
+      _beginProcessing();
       handleNumberInput(quickFillNum, cell);
       _checkQuickFillComplete();
+      _endProcessing();
       return;
     }
 
     // 单选：先选中格子
+    _beginProcessing();
     if (board.selectedCells.length > 0) {
       board.clearMultiSelect();
     }
@@ -3375,6 +3496,7 @@
         GuideBattle.onPlayerFocusCell(cell.r, cell.c);
       }, 150); // 略微延迟，模拟AI"反应时间"
     }
+    _endProcessing();
   }
 
   function onCanvasPointerMove(e) {
@@ -3386,16 +3508,41 @@
     const cell = getCellFromEvent(e);
     if (!cell) return;
 
-    // 清除长按定时器（移动了就不是长按了）
+    // 清除长按定时器（移动超过阈值就不是长按了）
     if (longPressTimer) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
+      const canvas = document.getElementById('gameCanvas');
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const dx = (e.clientX - rect.left) - _swipeStartPos.x;
+        const dy = (e.clientY - rect.top) - _swipeStartPos.y;
+        // P0优化：移动超过5px清除长按（更灵敏的长按取消）
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+          longPressPhase = 0;
+          longPressCell = null;
+          _setLongPressHalo(0);
+        }
+      }
     }
-    longPressPhase = 0;
-    longPressCell = null;
-    _setLongPressHalo(0);
 
-    // 如果移动距离超过阈值，开始多选
+    // P0优化：使用像素距离阈值（10px）判断拖拽，而非格子坐标变化
+    // 防止手指微小抖动误触发拖拽，或大格子上轻微移动就触发
+    if (!isDragging && _swipeStartPos) {
+      const canvas = document.getElementById('gameCanvas');
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const dx = (e.clientX - rect.left) - _swipeStartPos.x;
+        const dy = (e.clientY - rect.top) - _swipeStartPos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= 10) {
+          // 移动小于10px，不判定为拖拽
+          return;
+        }
+      }
+    }
+
+    // 如果移动距离超过10px阈值且格子变化，开始多选
     if (!isDragging && (cell.r !== dragStartCell.r || cell.c !== dragStartCell.c)) {
       isDragging = true;
       // 自动进入笔记模式
@@ -3596,9 +3743,49 @@
   }
 
   // === Number Pad Pointer Handlers ===
+  // P0优化：事件代理包装函数 —— 从pad容器事件中找到目标按钮并转发
+  function _getNumBtnFromEvent(e) {
+    return e.target.closest('.num-btn');
+  }
+
+  function onNumPadPointerDown(e) {
+    const btn = _getNumBtnFromEvent(e);
+    if (!btn) return;
+    // 构造代理事件对象，替换 currentTarget 为按钮
+    const proxyEvt = Object.create(e, { currentTarget: { value: btn } });
+    onNumBtnPointerDown(proxyEvt);
+  }
+
+  function onNumPadPointerMove(e) {
+    // pointermove 时，按钮可能已经不是按下的那个，但我们用 _numBtnPressed 追踪
+    if (!_numBtnPressed) return;
+    const proxyEvt = Object.create(e, { currentTarget: { value: _numBtnPressed } });
+    onNumBtnPointerMove(proxyEvt);
+  }
+
+  function onNumPadPointerUp(e) {
+    if (!_numBtnPressed) return;
+    const proxyEvt = Object.create(e, { currentTarget: { value: _numBtnPressed } });
+    onNumBtnPointerUp(proxyEvt);
+  }
+
+  function onNumPadPointerLeave(e) {
+    // pointerleave 是直接绑定在 pad 上的，离开 pad 时触发
+    // 我们需要模拟离开当前按下的按钮
+    if (_numBtnPressed) {
+      const proxyEvt = Object.create(e, { currentTarget: { value: _numBtnPressed } });
+      onNumBtnPointerLeave(proxyEvt);
+    }
+  }
+
+  // P0触控优化：pointerdown立即填数（零延迟），长按/滑动时回退
+  let _instantFillCommitted = false; // 即时填数是否已提交（非回退状态）
+  let _instantFillNum = null; // 即时填入的数字（用于回退）
+
   function onNumBtnPointerDown(e) {
     if (storyEngine && storyEngine._isPlaying) return;
     if (isCompleted) return;
+    if (_isProcessingInput) return; // 状态锁：处理中不响应
     e.preventDefault();
 
     const btn = e.currentTarget;
@@ -3612,6 +3799,8 @@
     _numBtnPressed = btn;
     _numBtnHandled = false;
     longPressTriggered = false;
+    _instantFillCommitted = false;
+    _instantFillNum = null;
 
     // 教学 NOTE_ONLY 模式：禁用连填，直接输入笔记
     const isNoteLesson = lessonPlayer && lessonPlayer.isActive && lessonPlayer.isWaitingInput
@@ -3626,17 +3815,21 @@
           if (renderer) renderer.render(board);
         }
       }
-      // 点击数字键直接切换笔记
+      // 点击数字键直接切换笔记（零延迟）
+      _beginProcessing();
       handleNumberInput(num);
-      _numBtnHandled = true; // 标记已处理，防止pointerleave/up重复触发
+      _endProcessing();
+      _numBtnHandled = true;
+      _instantFillCommitted = true;
       return;
     }
 
-    // 如果已经是连填状态，再次点击则取消（toggle）
+    // 如果已经是连填状态，再次点击则取消（toggle）——零延迟
     if (quickFillMode && quickFillNum === num) {
       exitQuickFillMode();
       _numBtnHandled = true;
       longPressTriggered = true; // 标记防止up时再触发
+      _instantFillCommitted = true;
       return;
     }
 
@@ -3646,18 +3839,43 @@
     // 添加长按蓄力视觉效果
     btn.classList.add('long-pressing');
 
-    // 长按检测：650ms 后激活连填模式
+    // P0优化：有选中格子时，pointerdown立即填数（零延迟响应）
+    // 后续如果触发长按或上滑，再回退这次填数
+    if (!quickFillMode && (board.selectedCell || board.selectedCells.length > 0)) {
+      _beginProcessing();
+      handleNumberInput(num);
+      _endProcessing();
+      _instantFillCommitted = true;
+      _instantFillNum = num;
+    }
+
+    // 长按检测：500ms 后激活连填模式
     longPressTimer = setTimeout(() => {
       longPressTriggered = true;
       _numBtnHandled = true;
       btn.classList.remove('long-pressing');
+
+      // 如果之前做了即时填数，需要回退
+      if (_instantFillCommitted && _instantFillNum !== null) {
+        _beginProcessing();
+        board.undo(); // 回退即时填数
+        renderer.render(board);
+        _endProcessing();
+        _instantFillCommitted = false;
+        _instantFillNum = null;
+      }
+
+      // 触感反馈：长按激活时震动
+      if (navigator.vibrate) navigator.vibrate(15);
       enterQuickFillMode(num);
-    }, 650);
+    }, 500);
   }
 
   function onNumBtnPointerMove(e) {
     if (storyEngine && storyEngine._isPlaying) return;
     if (isCompleted) return;
+    if (_isProcessingInput) return;
+    e.preventDefault(); // P0优化：防止页面随手指滑动
 
     const btn = e.currentTarget;
 
@@ -3686,8 +3904,21 @@
         longPressTimer = null;
       }
       btn.classList.remove('long-pressing');
+
+      // P0优化：如果之前做了即时填数，需要回退
+      if (_instantFillCommitted && _instantFillNum !== null) {
+        _beginProcessing();
+        board.undo();
+        renderer.render(board);
+        _endProcessing();
+        _instantFillCommitted = false;
+        _instantFillNum = null;
+      }
+
       // 上划：在选中格子/多选格子中切换笔记
+      _beginProcessing();
       handleSwipeUpNote(num);
+      _endProcessing();
       longPressTriggered = true; // 标记为已处理，防止up时再触发
       _numBtnHandled = true;
     }
@@ -3737,9 +3968,16 @@
         enterQuickFillMode(num);
       }
       // 点击同一数字 → 已在down时处理取消
+    } else if (_instantFillCommitted) {
+      // P0优化：pointerdown时已即时填数，pointerup时无需重复操作
+      // 仅做状态确认
+      _instantFillCommitted = false;
+      _instantFillNum = null;
     } else if (board.selectedCell || board.selectedCells.length > 0) {
-      // 有选中格子 → 直接填入数字
+      // 有选中格子但未即时填数（特殊情况） → 填入数字
+      _beginProcessing();
       handleNumberInput(num);
+      _endProcessing();
     } else {
       // 没有选中格子 → 进入连填模式
       enterQuickFillMode(num);
@@ -3769,30 +4007,59 @@
   }
 
   function handleSwipeUpNote(num) {
-    // 上划：切换笔记候选数
+    // 上划：切换笔记候选数（无论当前模式，强制切换候选，不改变全局笔记模式）
     const hasSelection = board.selectedCells.length > 0;
     const hasSingle = board.selectedCell;
 
+    // 确保笔记系统显示候选数（临时展开单格态）
+    if (window.gameNoteSystem && hasSingle) {
+      const { r, c } = hasSingle;
+      if (typeof window.gameNoteSystem.showSingleCell === 'function') {
+        window.gameNoteSystem.showSingleCell(r, c);
+      }
+    }
+
+    let toggled = false;
     if (hasSelection && board.selectedCells.length > 1) {
       // 多选模式：使用内置的批量切换笔记方法
       board.toggleCandidateForSelection(num);
+      toggled = true;
     } else if (hasSingle) {
       // 单选模式：切换笔记
-      board.toggleCandidate(num);
+      const cell = board.cells[hasSingle.r][hasSingle.c];
+      if (!cell.fixedNum && !cell.fillNum) {
+        board.toggleCandidate(num);
+        toggled = true;
+      } else if (cell.fillNum && !cell.fixedNum) {
+        // 如果格子有填数，先清除填数再切换候选（上滑=强制笔记模式）
+        board.eraseNumber();
+        board.toggleCandidate(num);
+        toggled = true;
+      }
     } else if (hasSelection) {
       // 只有一个selectedCell时也用toggleCandidate
       board.toggleCandidate(num);
+      toggled = true;
     }
+
+    if (!toggled) return;
+
+    // 标记已使用笔记
+    usedNotes = true;
 
     // 更新笔记系统
     if (window.gameNoteSystem && typeof window.gameNoteSystem.onNumberFilled === 'function') {
       window.gameNoteSystem.onNumberFilled();
     }
 
+    renderer.forceRender = true;
     renderer.render(board);
 
     // 震动反馈（如果支持）
-    if (navigator.vibrate) navigator.vibrate(10);
+    if (navigator.vibrate) navigator.vibrate([8, 15, 8]);
+
+    // 播放笔记切换音效
+    AudioService.sfx.play('note_toggle');
   }
 
   // === 连填模式 ===
@@ -4007,7 +4274,7 @@
     // Number keys 1-9
     if (e.key >= '1' && e.key <= '9') {
       const num = parseInt(e.key);
-      if (num <= board.size) {
+      if (num <= board.size && !_isProcessingInput) {
         // 教学 NOTE_ONLY 模式：确保笔记模式开启，并自动选中目标格
         const isNoteLesson = lessonPlayer && lessonPlayer.isActive && lessonPlayer.isWaitingInput
           && lessonPlayer.getInteractionType() === 'NOTE_ONLY';
@@ -4027,7 +4294,9 @@
           }
         }
 
+        _beginProcessing();
         handleNumberInput(num);
+        _endProcessing();
       }
       e.preventDefault();
       return;
@@ -4384,16 +4653,45 @@
     // 同步到 PC 端
     const pcBtn = document.getElementById('pc-btn-note');
     if (pcBtn) pcBtn.classList.toggle('active', noteMode);
+    // 同步键盘区域笔记模式视觉提示（移动端）
+    const numPad = document.getElementById('num-pad');
+    if (numPad) numPad.classList.toggle('note-mode-active', noteMode);
+    const noteIndicator = document.getElementById('note-mode-indicator');
+    if (noteIndicator) noteIndicator.classList.toggle('show', noteMode);
+    // 同步键盘区域笔记模式视觉提示（PC端）
+    const pcNumPad = document.getElementById('pc-num-pad');
+    if (pcNumPad) pcNumPad.classList.toggle('note-mode-active', noteMode);
+    const pcNoteIndicator = document.getElementById('pc-note-mode-indicator');
+    if (pcNoteIndicator) pcNoteIndicator.classList.toggle('show', noteMode);
   }
 
   function handleErase() {
+    if (_isProcessingInput) return;
+    _beginProcessing();
     AudioService.sfx.play('erase');
-    if (board.selectedCells.length > 1) {
-      // 多选模式：使用内置的批量擦除方法
-      board.eraseSelection();
-    } else if (board.selectedCell || (board.selectedCells.length === 1)) {
-      board.eraseNumber();
+
+    // === 模式感知的擦除 ===
+    // 笔记模式：只清除候选数（不清除填数）
+    // 正常模式：清除填数（候选数也一起清除，保持棋盘干净）
+    if (noteMode) {
+      // 笔记模式擦除：只清除候选数
+      if (board.selectedCells.length > 1) {
+        board.eraseCandidatesForSelection();
+      } else if (board.selectedCell || board.selectedCells.length === 1) {
+        board.eraseCandidates();
+      }
+    } else {
+      // 正常模式擦除：清除填数（含候选数）
+      if (board.selectedCells.length > 1) {
+        board.eraseSelection();
+      } else if (board.selectedCell || (board.selectedCells.length === 1)) {
+        board.eraseNumber();
+      }
     }
+
+    // 触感反馈
+    if (navigator.vibrate) navigator.vibrate(10);
+
     // 连击系统：擦除断连
     if (comboSystem) {
       comboSystem.onErase();
@@ -4419,11 +4717,14 @@
       const label = cell ? `R${cell.r + 1}C${cell.c + 1}=∅` : 'erase';
       addWhatIfSnapshot(label);
     }
+    _endProcessing();
   }
 
   // === Undo ===
   function undo() {
     if (!board) return;
+    if (_isProcessingInput) return;
+    _beginProcessing();
     // Boss战：记录撤销的位置
     let undoR = -1, undoC = -1;
     if (typeof GuideBattle !== 'undefined' && GuideBattle.active && board.selectedCell) {
@@ -4442,6 +4743,7 @@
       const updateCell = board.selectedCell || (board.selectedCells && board.selectedCells[0]);
       updateRule45Banner(updateCell);
     }
+    _endProcessing();
   }
 
   // === Erase ===
@@ -4456,6 +4758,13 @@
     if (newMode === noteMode) return; // 状态未变化，不重复触发
     noteMode = newMode;
     AudioService.sfx.play('note_toggle');
+
+    // === 即时视觉反馈（< 50ms） ===
+    // 立即更新按钮状态 + 键盘区域视觉提示
+    updateNoteButtonState();
+    // 触感反馈
+    if (navigator.vibrate) navigator.vibrate(noteMode ? [10, 20, 10] : 8);
+
     // 切换笔记模式时清除多选
     if (board && board.selectedCells.length > 0) {
       board.clearMultiSelect();
@@ -4470,9 +4779,7 @@
         board.inputMode = targetMode;
       }
     }
-    updateNoteButtonState();
     EventLogger.log('game:noteMode', { enabled: noteMode });
-    showToast(noteMode ? '笔记模式：点击数字填入候选数' : '填数模式：点击数字填入答案', 1200);
 
     // 吐槽系统：首次切换到笔记模式
     if (noteMode && comedySystem && !usedNotes) {
@@ -4482,8 +4789,8 @@
     // 重新渲染（强制重绘，确保笔记显示状态正确）
     if (renderer && board) {
       renderer.forceRender = true;
-      // 延迟一帧再渲染一次，确保状态同步
       renderer.render(board);
+      // 延迟一帧再渲染一次，确保状态同步
       requestAnimationFrame(() => {
         if (renderer && board) {
           renderer.forceRender = true;
@@ -4491,6 +4798,9 @@
         }
       });
     }
+
+    // 轻量 Toast 提示（缩短显示时间，避免干扰）
+    showToast(noteMode ? '笔记模式' : '填数模式', 800);
   }
 
   // === Hint ===
@@ -4902,6 +5212,29 @@
     currentHint: null,
     totalSteps: 0,
     currentStep: 0,
+    // P2优化：统一管理提示相关的定时器，可一键清理
+    _timers: new Set(),
+    // 注册定时器，返回timer ID
+    _setTimeout(fn, delay) {
+      const timer = setTimeout(() => {
+        this._timers.delete(timer);
+        fn();
+      }, delay);
+      this._timers.add(timer);
+      return timer;
+    },
+    // 清理所有提示相关定时器
+    _clearAllTimers() {
+      for (const timer of this._timers) {
+        clearTimeout(timer);
+      }
+      this._timers.clear();
+      // 同时清理打字机定时器
+      if (NarrationState && NarrationState.typewriterTimer) {
+        clearTimeout(NarrationState.typewriterTimer);
+        NarrationState.typewriterTimer = null;
+      }
+    },
   };
 
   // ============================================================
@@ -5869,12 +6202,12 @@
     HintPlayerState.playing = false;
 
     // 隐藏解说气泡（延迟一点，让完成感更强）
-    setTimeout(() => {
+    HintPlayerState._setTimeout(() => {
       hideNarrationBubble();
     }, 400);
 
     // 隐藏进度指示器（延迟一点，让完成感更强）
-    setTimeout(() => {
+    HintPlayerState._setTimeout(() => {
       const hintProg = document.getElementById('hint-progress-indicator');
       if (hintProg) hintProg.style.display = 'none';
       // 如果 What If 模式未激活，隐藏浮条
@@ -5902,6 +6235,7 @@
 
   /**
    * 跳过当前提示步骤
+   * P2优化：立即跳过，响应 < 50ms
    */
   function skipHintStep() {
     if (!renderer || !HintPlayerState.playing) return;
@@ -5910,21 +6244,31 @@
     if (typeof renderer.skipHintStep === 'function') {
       renderer.skipHintStep();
     }
+    AudioService.sfx.play?.('click');
   }
 
   /**
    * 停止提示动画
+   * P2优化：立即中断所有定时器链（打字机、气泡、动画等），响应 < 50ms
    */
   function stopHintAnimation() {
     if (!renderer) return;
+    // 立即清理所有提示相关定时器
+    HintPlayerState._clearAllTimers();
+    // 停止renderer中的提示动画
     if (typeof renderer.stopHintAnimation === 'function') {
       renderer.stopHintAnimation();
     }
     HintPlayerState.playing = false;
-    // 隐藏解说气泡
+    HintPlayerState.currentHint = null;
+    // 立即隐藏解说气泡（不等待动画）
     hideNarrationBubble();
     const hintProg = document.getElementById('hint-progress-indicator');
     if (hintProg) hintProg.style.display = 'none';
+    // 立即清理技术矩阵提示高亮
+    if (techMatrix && typeof techMatrix.clearHighlight === 'function') {
+      techMatrix.clearHighlight();
+    }
     if (!WhatIfState.active) {
       hideFloatBar();
     }
@@ -6509,6 +6853,7 @@
 
   /**
    * 跳转到指定快照
+   * P2优化：移除200ms延迟，使用快速过渡（<100ms），无白屏
    */
   function jumpToWhatIfSnapshot(index) {
     if (!WhatIfState.active || !WhatIfState.snapshots[index]) return;
@@ -6516,16 +6861,19 @@
     const snap = WhatIfState.snapshots[index];
     WhatIfState.currentIndex = index;
 
-    // 淡入淡出效果
+    // 快速淡入淡出效果（100ms，无白屏）
     const canvas = document.getElementById('gameCanvas');
     if (canvas) {
-      canvas.style.opacity = '0.3';
-      setTimeout(() => {
+      canvas.style.transition = 'opacity 0.1s ease-out';
+      canvas.style.opacity = '0.6';
+      // 下一帧立即恢复数据并重绘
+      requestAnimationFrame(() => {
         _restoreWhatIfSnapshot(snap);
-        canvas.style.opacity = '1';
-        canvas.style.transition = 'opacity 0.3s ease';
-        setTimeout(() => { canvas.style.transition = ''; }, 300);
-      }, 200);
+        requestAnimationFrame(() => {
+          canvas.style.opacity = '1';
+          setTimeout(() => { canvas.style.transition = ''; }, 110);
+        });
+      });
     } else {
       _restoreWhatIfSnapshot(snap);
     }

@@ -804,34 +804,60 @@ const GuideBattle = {
       }
     }
 
-    // 尝试拦截
-    const interceptStep = this._aiPlayer.tryIntercept(r, c);
-    if (interceptStep) {
-      // 设置冷却（杀手数独关卡冷却更长，给玩家留足心算空间）
-      const tuning = this.opponent?.battleTuning;
-      this._interceptCooldown = tuning?.interceptCooldown || 3000; // 默认3秒
-
-      // 延迟执行拦截，给玩家一点"被抢"的反应时间
-      const thinkTime = interceptStep.thinkTime || 300;
-      this._aiThinking = true;
-
-      setTimeout(() => {
-        if (!this.active || this.ended) {
-          this._aiThinking = false;
-          return;
-        }
-        this._applyAiMove(interceptStep);
+    // P2优化：将拦截判断放入setTimeout(0)，避免阻塞当前渲染帧
+    // 确保幽灵格呼吸动画不卡顿
+    this._aiThinking = true; // 标记为思考中，防止重复触发
+    setTimeout(() => {
+      if (!this.active || this.ended) {
         this._aiThinking = false;
-        // 继续正常AI循环
-        this._scheduleAiMove();
-      }, thinkTime);
+        return;
+      }
 
-      // 显示拦截提示
-      this._showInterceptFeedback(r, c);
-      return true;
-    }
+      // 再次检查格子状态（玩家可能已经填了）
+      const curCell = this._board.cells[r]?.[c];
+      if (!curCell || curCell.fixedNum || curCell.fillNum ||
+          this.aiOwned[r][c] || this.playerOwned[r][c]) {
+        this._aiThinking = false;
+        return;
+      }
 
-    return false;
+      // 尝试拦截
+      const interceptStep = this._aiPlayer.tryIntercept(r, c);
+      if (interceptStep) {
+        // 设置冷却（杀手数独关卡冷却更长，给玩家留足心算空间）
+        const tuning = this.opponent?.battleTuning;
+        this._interceptCooldown = tuning?.interceptCooldown || 3000; // 默认3秒
+
+        // 延迟执行拦截，给玩家一点"被抢"的反应时间
+        const thinkTime = interceptStep.thinkTime || 300;
+
+        setTimeout(() => {
+          if (!this.active || this.ended) {
+            this._aiThinking = false;
+            return;
+          }
+          // 再次检查格子状态
+          const finalCell = this._board.cells[r]?.[c];
+          if (!finalCell || finalCell.fixedNum || finalCell.fillNum ||
+              this.aiOwned[r][c] || this.playerOwned[r][c]) {
+            this._aiThinking = false;
+            this._scheduleAiMove();
+            return;
+          }
+          this._applyAiMove(interceptStep);
+          this._aiThinking = false;
+          // 继续正常AI循环
+          this._scheduleAiMove();
+        }, thinkTime);
+
+        // 显示拦截提示
+        this._showInterceptFeedback(r, c);
+      } else {
+        this._aiThinking = false;
+      }
+    }, 0);
+
+    return true; // 异步拦截中，返回true表示已开始处理
   },
 
   // ======================================================
@@ -1462,36 +1488,46 @@ const GuideBattle = {
 
   /**
    * 基于TechRater的AI走棋
+   * P2优化：将AI思考放入setTimeout(0)让步给渲染，避免幽灵格呼吸动画卡顿
    */
   _aiMoveWithRater() {
-    // 先思考
-    const step = this._aiPlayer.think();
-
-    if (!step) {
-      // AI找不到可填的了（可能卡住了），用降级方案找一个
-      console.warn('[GuideBattle] AI think returned null, using fallback');
-      this._aiThinking = false;
-      this._aiMoveLegacy();
-      return;
-    }
-
-    // 模拟思考时间后再执行
+    // 将思考过程放入下一个事件循环，让当前渲染帧先完成
+    // 避免AI计算阻塞主线程导致幽灵格动画卡顿
     setTimeout(() => {
       if (!this.active || this.ended) {
         this._aiThinking = false;
         return;
       }
 
-      const applied = this._applyAiMove(step);
-      this._aiThinking = false;
+      // 先思考
+      const step = this._aiPlayer.think();
 
-      // 安排下一步
-      if (applied && this.active && !this.ended) {
-        this._scheduleAiMove();
-      } else if (this.active && !this.ended) {
-        this._scheduleAiMove();
+      if (!step) {
+        // AI找不到可填的了（可能卡住了），用降级方案找一个
+        console.warn('[GuideBattle] AI think returned null, using fallback');
+        this._aiThinking = false;
+        this._aiMoveLegacy();
+        return;
       }
-    }, step.thinkTime);
+
+      // 模拟思考时间后再执行
+      setTimeout(() => {
+        if (!this.active || this.ended) {
+          this._aiThinking = false;
+          return;
+        }
+
+        const applied = this._applyAiMove(step);
+        this._aiThinking = false;
+
+        // 安排下一步
+        if (applied && this.active && !this.ended) {
+          this._scheduleAiMove();
+        } else if (this.active && !this.ended) {
+          this._scheduleAiMove();
+        }
+      }, step.thinkTime);
+    }, 0);
   },
 
   /**

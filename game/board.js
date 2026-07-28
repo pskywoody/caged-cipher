@@ -1011,6 +1011,54 @@ class Board {
   }
 
   /**
+   * 擦除选中格的候选数（仅笔记模式擦除）
+   * 不影响填数，只清除候选数
+   */
+  eraseCandidates() {
+    const selected = this.getActiveCell();
+    if (!selected) return;
+    const { r, c } = selected;
+    const cell = this.cells[r][c];
+    if (cell.fixedNum) return;
+    if (cell.candidates.size === 0) return;
+
+    this._pushHistory({
+      r, c,
+      oldFill: cell.fillNum,
+      oldCandidates: new Set(cell.candidates),
+    });
+
+    cell.candidates.clear();
+  }
+
+  /**
+   * 批量擦除选中格子的候选数（仅笔记模式）
+   */
+  eraseCandidatesForSelection() {
+    if (this.selectedCells.length === 0) return;
+
+    const historyEntry = {
+      type: 'batchEraseCandidates',
+      cells: []
+    };
+
+    for (const { r, c } of this.selectedCells) {
+      const cell = this.cells[r][c];
+      if (cell.fixedNum) continue;
+      if (cell.candidates.size === 0) continue;
+      historyEntry.cells.push({
+        r, c,
+        oldCandidates: new Set(cell.candidates),
+      });
+      cell.candidates.clear();
+    }
+
+    if (historyEntry.cells.length > 0) {
+      this._pushHistory(historyEntry);
+    }
+  }
+
+  /**
    * 一键清空所有笔记
    * 记录所有被清空的候选到历史，支持一次性撤销
    */
@@ -1119,6 +1167,16 @@ class Board {
       }
       // 批量擦除后重算笼子和值错误
       this._revalidateCagesForCells(last.cells.map(c => ({ r: c.r, c: c.c })));
+      return;
+    }
+
+    // 批量擦除候选的撤销
+    if (last.type === 'batchEraseCandidates') {
+      for (const { r, c, oldCandidates } of last.cells) {
+        const cell = this.cells[r][c];
+        if (cell.fixedNum) continue;
+        cell.candidates = new Set(oldCandidates);
+      }
       return;
     }
 
@@ -1231,6 +1289,15 @@ class Board {
       return;
     }
 
+    if (redoEntry.type === 'batchEraseCandidates') {
+      for (const { r, c, newCandidates } of redoEntry.cells) {
+        const cell = this.cells[r][c];
+        if (cell.fixedNum) continue;
+        cell.candidates = new Set(newCandidates);
+      }
+      return;
+    }
+
     // 普通单格操作的重做
     if (redoEntry.type === 'setNumber' || !redoEntry.type) {
       const cell = this.cells[redoEntry.r][redoEntry.c];
@@ -1313,6 +1380,14 @@ class Board {
     if (undoEntry.type === 'batchErase') {
       redoEntry.cells = undoEntry.cells.map(({ r, c, oldFill, oldCandidates, oldEliminations }) => ({
         r, c,
+      }));
+      return redoEntry;
+    }
+
+    if (undoEntry.type === 'batchEraseCandidates') {
+      redoEntry.cells = undoEntry.cells.map(({ r, c }) => ({
+        r, c,
+        newCandidates: new Set(this.cells[r][c].candidates),
       }));
       return redoEntry;
     }

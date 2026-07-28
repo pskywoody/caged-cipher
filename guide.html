@@ -504,6 +504,27 @@
         inset 0 1px 0 rgba(96, 165, 250, 0.2),
         0 0 8px rgba(96, 165, 250, 0.2);
     }
+    /* 擦除按钮长按蓄力效果 */
+    #toolbar #btn-erase.long-pressing {
+      position: relative;
+      overflow: hidden;
+      transition: none;
+    }
+    #toolbar #btn-erase.long-pressing::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 0%;
+      height: 3px;
+      background: linear-gradient(90deg, #d45656, #e88080);
+      border-radius: 0 0 4px 4px;
+      animation: erase-long-press-progress 0.5s ease-out forwards;
+    }
+    @keyframes erase-long-press-progress {
+      0%   { width: 0%; }
+      100% { width: 100%; }
+    }
     /* 竖屏隐藏非核心工具栏按钮 */
     #toolbar #btn-chapter,
     #toolbar #btn-pause,
@@ -678,12 +699,51 @@
       /* 铜绿色进度条 */
       background: linear-gradient(90deg, #4a9a4a, #7ac87a);
       border-radius: 0 0 8px 8px;
-      animation: long-press-progress 0.65s ease-out forwards;
+      animation: long-press-progress 0.5s ease-out forwards;
       z-index: 1;
     }
     @keyframes long-press-progress {
       0%   { width: 0%; }
       100% { width: 100%; }
+    }
+    /* 笔记模式：键盘区域视觉提示 */
+    #num-pad.note-mode-active {
+      /* 笔记模式下键盘区域整体边框变紫蓝色 */
+      box-shadow:
+        0 0 0 2px rgba(147, 112, 219, 0.6),
+        0 0 12px rgba(147, 112, 219, 0.3);
+      border-radius: 12px;
+      padding: 6px 4px 4px;
+      transition: all 0.15s ease;
+    }
+    #num-pad.note-mode-active .num-btn {
+      /* 笔记模式下数字键带有淡紫色调 */
+      border-color: #7a6a9a;
+    }
+    #num-pad.note-mode-active .num-btn .num-main::after {
+      /* 数字右上角的笔记标记点 */
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      background: #9370db;
+      border-radius: 50%;
+      margin-left: 2px;
+      vertical-align: super;
+      box-shadow: 0 0 4px rgba(147, 112, 219, 0.8);
+    }
+    /* 笔记模式指示条 */
+    .note-mode-indicator {
+      display: none;
+      text-align: center;
+      font-size: 10px;
+      color: #b8a4d8;
+      padding: 2px 0;
+      letter-spacing: 2px;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+    .note-mode-indicator.show {
+      display: block;
     }
     /* 连填模式提示 */
     .quick-fill-hint {
@@ -2170,6 +2230,30 @@
         opacity: 0.4;
         pointer-events: none;
         filter: grayscale(0.5);
+      }
+
+      /* PC 端笔记模式视觉提示 */
+      #pc-num-pad.note-mode-active {
+        box-shadow:
+          0 0 0 2px rgba(147, 112, 219, 0.6),
+          0 0 12px rgba(147, 112, 219, 0.3);
+        border-radius: 10px;
+        padding: 8px 6px 6px;
+        transition: all 0.15s ease;
+      }
+      #pc-num-pad.note-mode-active .num-btn {
+        border-color: #7a6a9a;
+      }
+      #pc-num-pad.note-mode-active .num-btn .num-main::after {
+        content: '';
+        display: inline-block;
+        width: 5px;
+        height: 5px;
+        background: #9370db;
+        border-radius: 50%;
+        margin-left: 2px;
+        vertical-align: super;
+        box-shadow: 0 0 4px rgba(147, 112, 219, 0.8);
       }
 
       /* PC 端工具栏 */
@@ -3870,6 +3954,7 @@
           <button class="num-btn" data-num="8"><span class="num-main">8</span><span class="num-count">9</span></button>
           <button class="num-btn" data-num="9"><span class="num-main">9</span><span class="num-count">9</span></button>
         </div>
+        <p id="note-mode-indicator" class="note-mode-indicator">✏ 笔记模式 ✏</p>
         <p id="quick-fill-hint" class="quick-fill-hint">💡 长按数字键激活连填，点格子自动填入</p>
       </div>
     </div>
@@ -3911,6 +3996,7 @@
           <button class="num-btn" data-num="8"><span class="num-main">8</span><span class="num-count">9</span></button>
           <button class="num-btn" data-num="9"><span class="num-main">9</span><span class="num-count">9</span></button>
         </div>
+        <p id="pc-note-mode-indicator" class="note-mode-indicator">✏ 笔记模式 ✏</p>
         <!-- PC 端工具栏 -->
         <div id="pc-toolbar">
           <button id="pc-btn-undo" title="撤销 (Ctrl+Z)">↶</button>

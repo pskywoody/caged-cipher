@@ -364,6 +364,12 @@ class Renderer {
     this._fillAnimationEnabled = true; // 是否启用填数动画
     this._animFrameId = null;          // requestAnimationFrame ID
     this._currentBoard = null;         // 当前 board 引用（用于动画循环）
+    // ===== P2性能优化：rAF节流渲染 =====
+    this._renderPending = false;       // 是否有待渲染的请求（节流用）
+    this._cachedClientWidth = 0;       // 缓存的canvas clientWidth
+    this._cachedClientHeight = 0;      // 缓存的canvas clientHeight
+    this._cachedCellSize = 0;          // 缓存的cellSize计算结果
+    this._sizeCacheDirty = true;       // 尺寸缓存是否脏（resize时设为true）
     // 笔记系统引用（可显式设置，也可从全局读取）
     this._noteSystem = null;
     // Boss战系统
@@ -2159,6 +2165,7 @@ class Renderer {
 
   /**
    * 确保动画循环正在运行
+   * P2优化：动画循环使用renderImmediate直接渲染，避免rAF嵌套
    * @private
    */
   _ensureAnimLoop() {
@@ -2166,7 +2173,7 @@ class Renderer {
       this._animFrameId = requestAnimationFrame(() => {
         this._animFrameId = null;
         if (this._currentBoard) {
-          this.render(this._currentBoard);
+          this.renderImmediate(this._currentBoard);
         }
       });
     }
@@ -3265,10 +3272,26 @@ class Renderer {
   }
 
   /**
+   * 标记尺寸缓存为脏（窗口resize/布局变化时调用）
+   */
+  invalidateSizeCache() {
+    this._sizeCacheDirty = true;
+    this._staticCacheKey = '';
+    this._boardCacheKey = '';
+  }
+
+  /**
    * 根据棋盘尺寸和容器宽高计算合适的 cellSize
    * 同时考虑宽度和高度，取较小值以确保完整显示
+   * P2优化：带缓存，尺寸未变化时直接返回，避免每帧读取clientWidth触发重排
    */
   recalcCellSize(board) {
+    // 如果缓存未脏且已有有效值，直接返回
+    if (!this._sizeCacheDirty && this._cachedCellSize > 0) {
+      this.cellSize = this._cachedCellSize;
+      return;
+    }
+
     // 多重 fallback 获取可用宽度和高度
     let cssWidth = this.canvas.clientWidth;
     let cssHeight = this.canvas.clientHeight;
@@ -3296,6 +3319,17 @@ class Renderer {
     if (!cssHeight || cssHeight < 10) {
       cssHeight = 400;
     }
+
+    // 检查尺寸是否真的变化了
+    if (cssWidth === this._cachedClientWidth && cssHeight === this._cachedClientHeight && this._cachedCellSize > 0) {
+      this._sizeCacheDirty = false;
+      this.cellSize = this._cachedCellSize;
+      return;
+    }
+
+    this._cachedClientWidth = cssWidth;
+    this._cachedClientHeight = cssHeight;
+
     const size = board.size;
     // 同时考虑宽高，取较小值确保棋盘完整显示且不变形
     const availableWidth = cssWidth - this.paddingLeft - this.paddingRight;
@@ -3304,6 +3338,9 @@ class Renderer {
     const cellSizeByH = Math.floor(availableHeight / size);
     this.cellSize = Math.min(cellSizeByW, cellSizeByH);
     if (this.cellSize < 30) this.cellSize = 30;
+
+    this._cachedCellSize = this.cellSize;
+    this._sizeCacheDirty = false;
   }
 
   getBoxSize(size) {
@@ -3314,13 +3351,39 @@ class Renderer {
 
   /**
    * 主渲染入口
+   * P2优化：使用requestAnimationFrame节流，避免同步重复渲染
    */
   render(board) {
+    this._currentBoard = board;
+    // 如果有待渲染的请求，直接返回（rAF节流）
+    if (this._renderPending) return;
+    this._renderPending = true;
+    requestAnimationFrame(() => {
+      this._renderPending = false;
+      if (!this._currentBoard) return;
+      try {
+        this._doRender(this._currentBoard);
+      } catch (e) {
+        console.error('[Renderer] render error:', e);
+        // 降级：基础渲染，保证不白屏
+        try {
+          this._renderFallback(this._currentBoard);
+        } catch (e2) {
+          console.error('[Renderer] fallback also failed:', e2);
+        }
+      }
+    });
+  }
+
+  /**
+   * 强制立即渲染（跳过节流，用于需要同步刷新的场景）
+   */
+  renderImmediate(board) {
+    this._currentBoard = board;
     try {
       this._doRender(board);
     } catch (e) {
-      console.error('[Renderer] render error:', e);
-      // 降级：基础渲染，保证不白屏
+      console.error('[Renderer] renderImmediate error:', e);
       try {
         this._renderFallback(board);
       } catch (e2) {
@@ -3438,10 +3501,13 @@ class Renderer {
     const hasComboGlow = this._comboGlowEnabled && this._comboCount >= 3;
     // 提示播放动画需要持续重绘
     const hasHintAnimation = this._hintAnimState.active;
+    // P2优化：Boss战中幽灵格呼吸动画需要持续重绘
+    const hasBossBattleBreathing = this._bossBattleActive && this._bossBattle &&
+      (this._bossBattle.aiCount > 0 || this._bossBattle.playerCount > 0);
     if (hasActiveAnimations || hasParticles || hasFakeCellEffects || hasLockEffects ||
         hasRegionLockEffects || hasRevealedNotes || hasCollapseEffects || hasGateAlerts ||
         hasGatePulse || hasAvalancheRays ||
-        hasThreeActBorders || hasComboGlow || hasHintAnimation) {
+        hasThreeActBorders || hasComboGlow || hasHintAnimation || hasBossBattleBreathing) {
       this._ensureAnimLoop();
     } else {
       this._stopAnimLoop();
