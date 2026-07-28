@@ -1813,14 +1813,15 @@
       overlay.id = 'chapter-select-overlay';
       overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;' +
         'background:rgba(26,22,18,0.92);z-index:22000;display:none;' +
-        'flex-direction:column;align-items:center;overflow-y:auto;' +
+        'flex-direction:column;overflow-y:auto;' +
+        '-webkit-overflow-scrolling:touch;overscroll-behavior:contain;' +
         'opacity:0;transform:translateX(-30px);backdrop-filter:blur(6px);' +
         'padding:20px 16px;';
 
       // 主纸张容器 — 泛黄档案纸
       const paper = document.createElement('div');
       paper.id = 'cs-paper';
-      paper.style.cssText = 'width:100%;max-width:900px;' +
+      paper.style.cssText = 'width:100%;max-width:900px;flex-shrink:0;margin:0 auto;' +
         'background:' +
         /* 纸张纹理：横线 + 噪点 */
         'repeating-linear-gradient(0deg,' +

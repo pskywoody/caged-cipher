@@ -160,6 +160,10 @@
     for (const ch of global.CHAPTER_DATA.chapters) {
       if (ch.chapterId === chapterId) {
         currentChapterData = ch;
+        // 同步到 ctx（解决值拷贝不同步问题）
+        if (orchestrator && orchestrator.ctx) {
+          orchestrator.ctx.currentChapterData = ch;
+        }
         return;
       }
     }
