@@ -379,6 +379,11 @@
       if (typeof this.renderer.setLevelBackground === 'function') {
         this.renderer.setLevelBackground(this.currentLevelId);
       }
+      // P2-3: 同步当前画质等级（从 PerformanceMonitor）
+      if (typeof PerformanceMonitor !== 'undefined' &&
+          typeof this.renderer.setQualityLevel === 'function') {
+        this.renderer.setQualityLevel(PerformanceMonitor.getQualityLevel());
+      }
       this.renderer.recalcCellSize(this.board);
       this.renderer.render(this.board);
 

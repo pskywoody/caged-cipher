@@ -464,3 +464,80 @@ body {
   border-color: #a78bfa !important;
   box-shadow: 0 0 12px rgba(139, 92, 246, 0.5) !important;
 }
+
+/* ============================================
+   P2-3: 画质等级相关样式
+   ============================================ */
+
+/* 中画质：关闭 DOM 层阴影和发光 */
+body.quality-medium #gameCanvas {
+  box-shadow: none !important;
+}
+
+body.quality-medium .combo-number {
+  animation: none !important;
+  transition: none !important;
+}
+
+body.quality-medium .hint-popup {
+  animation: none !important;
+  transition: opacity 0.1s linear !important;
+}
+
+/* 低画质：进一步简化 */
+body.quality-low #gameCanvas {
+  box-shadow: none !important;
+  image-rendering: auto;
+}
+
+body.quality-low .combo-number {
+  animation: none !important;
+  transition: none !important;
+  transform: none !important;
+}
+
+body.quality-low .hint-popup {
+  animation: none !important;
+  transition: opacity 0.1s linear !important;
+}
+
+body.quality-low .heatmap-overlay {
+  display: none !important;
+}
+
+body.quality-low .particle-container {
+  display: none !important;
+}
+
+/* 低画质下简化按钮和卡片效果 */
+body.quality-low .num-btn,
+body.quality-low #toolbar button {
+  box-shadow: none !important;
+  transition: none !important;
+}
+
+body.quality-low .num-btn:hover,
+body.quality-low #toolbar button:hover {
+  transform: none !important;
+}
+
+/* 低画质下关闭所有过渡动画（加速响应） */
+body.quality-low * {
+  animation-duration: 0.01s !important;
+  transition-duration: 0.01s !important;
+}
+
+/* 画质指示器（可选，调试用） */
+.quality-indicator {
+  position: fixed;
+  top: var(--safe-top);
+  right: 8px;
+  z-index: var(--z-toast);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  font-family: monospace;
+}

@@ -64,6 +64,34 @@
         ctx.settingsPanel.load();
       }
 
+      // P2-3: 初始化性能监控（FPS 检测 + 自动画质降级）
+      if (typeof PerformanceMonitor !== 'undefined') {
+        PerformanceMonitor.onQualityChange((newLevel, oldLevel, reason) => {
+          // 当 renderer 存在时，同步画质等级
+          if (ctx.renderer && typeof ctx.renderer.setQualityLevel === 'function') {
+            ctx.renderer.setQualityLevel(newLevel);
+          }
+          // 更新 body 上的画质类，供 CSS 使用
+          if (document.body) {
+            document.body.classList.remove('quality-high', 'quality-medium', 'quality-low');
+            document.body.classList.add('quality-' + newLevel);
+          }
+          log.info('[Performance] Quality: ' + oldLevel + ' -> ' + newLevel +
+                   ' (' + reason + ', avgFps: ' + PerformanceMonitor.avgFps + ')');
+        });
+
+        // 启动性能监控（首次检测会在后台进行）
+        PerformanceMonitor.start();
+
+        // 如果 settings panel 已经加载了画质设置，应用它
+        if (ctx.settingsPanel && ctx.settingsPanel.get) {
+          const savedQuality = ctx.settingsPanel.get('display.quality');
+          if (savedQuality && savedQuality !== 'auto') {
+            PerformanceMonitor.setQualityLevel(savedQuality);
+          }
+        }
+      }
+
       // GameContext 中央状态
       if (typeof initGameContext === 'function') {
         initGameContext({ logger: log });

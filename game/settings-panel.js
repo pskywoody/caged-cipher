@@ -74,6 +74,7 @@ class SettingsPanel {
         showCageSum: true,
         highlightSameNumber: true,
         showCandidates: true,
+        quality: 'auto',  // auto | high | medium | low
       },
     };
 
@@ -135,7 +136,7 @@ class SettingsPanel {
   }
 
   // === 版本迁移 ===
-  static get CURRENT_VERSION() { return 1; }
+  static get CURRENT_VERSION() { return 2; }
 
   save() {
     try {
@@ -196,6 +197,15 @@ class SettingsPanel {
     if (version < 1) {
       version = 1;
       // 预留 v1 迁移逻辑
+    }
+
+    // v1 → v2: 添加画质设置
+    if (version < 2) {
+      version = 2;
+      if (!data.settings.display) data.settings.display = {};
+      if (data.settings.display.quality === undefined) {
+        data.settings.display.quality = 'auto';
+      }
     }
 
     // 未来版本迁移在此添加 case
@@ -584,6 +594,82 @@ class SettingsPanel {
           </div>
         </div>
 
+        <!-- 画质设置 -->
+        <div class="settings-section" style="margin-top: 14px;">
+          <div style="
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 8px;
+          ">
+            <span style="color: #e8eaed; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 14px;">🎨</span>画质
+            </span>
+            <span class="quality-current-label" style="color: #6366f1; font-size: 11px; font-weight: 600;">自动</span>
+          </div>
+          <div class="quality-segmented" style="
+            display: flex;
+            background: rgba(42, 47, 58, 0.5);
+            border: 1px solid #2a2f3a;
+            border-radius: 10px;
+            padding: 3px;
+            gap: 2px;
+          ">
+            <button class="quality-btn" data-quality="auto" style="
+              flex: 1;
+              padding: 8px 4px;
+              background: transparent;
+              border: none;
+              color: #94a3b8;
+              font-size: 12px;
+              font-weight: 500;
+              border-radius: 8px;
+              cursor: pointer;
+              transition: all 0.2s;
+            ">自动</button>
+            <button class="quality-btn" data-quality="high" style="
+              flex: 1;
+              padding: 8px 4px;
+              background: transparent;
+              border: none;
+              color: #94a3b8;
+              font-size: 12px;
+              font-weight: 500;
+              border-radius: 8px;
+              cursor: pointer;
+              transition: all 0.2s;
+            ">高</button>
+            <button class="quality-btn" data-quality="medium" style="
+              flex: 1;
+              padding: 8px 4px;
+              background: transparent;
+              border: none;
+              color: #94a3b8;
+              font-size: 12px;
+              font-weight: 500;
+              border-radius: 8px;
+              cursor: pointer;
+              transition: all 0.2s;
+            ">中</button>
+            <button class="quality-btn" data-quality="low" style="
+              flex: 1;
+              padding: 8px 4px;
+              background: transparent;
+              border: none;
+              color: #94a3b8;
+              font-size: 12px;
+              font-weight: 500;
+              border-radius: 8px;
+              cursor: pointer;
+              transition: all 0.2s;
+            ">低</button>
+          </div>
+          <div class="quality-desc" style="
+            color: #64748b;
+            font-size: 11px;
+            margin-top: 6px;
+            line-height: 1.4;
+          ">自动模式会根据设备性能动态调整画质，保证流畅运行。</div>
+        </div>
+
         <!-- 高级设置折叠区 -->
         <div class="settings-advanced" style="margin-top: 14px;">
           <button class="settings-advanced-toggle" style="
@@ -931,6 +1017,16 @@ class SettingsPanel {
       });
     });
 
+    // 画质选择按钮
+    this.el.querySelectorAll('.quality-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const quality = btn.dataset.quality;
+        this.set('display.quality', quality);
+        this._updateQualityUI(quality);
+        if (typeof AudioService !== 'undefined') AudioService.sfx.play('click');
+      });
+    });
+
     // 高级设置折叠
     const advancedToggle = this.el.querySelector('.settings-advanced-toggle');
     const advancedContent = this.el.querySelector('.settings-advanced-content');
@@ -1076,6 +1172,9 @@ class SettingsPanel {
                         'display.showCageSum', 'display.highlightSameNumber', 'display.showCandidates']) {
       this._updateToggleUI(key, this.get(key));
     }
+
+    // 更新画质选择
+    this._updateQualityUI(this.get('display.quality'));
   }
 
   _updateToggleUI(key, value) {
@@ -1086,6 +1185,37 @@ class SettingsPanel {
       } else {
         toggle.classList.remove('active');
       }
+    }
+  }
+
+  /**
+   * 更新画质选择 UI
+   * @param {string} quality - 'auto' | 'high' | 'medium' | 'low'
+   */
+  _updateQualityUI(quality) {
+    const buttons = this.el.querySelectorAll('.quality-btn');
+    const labelMap = {
+      'auto': '自动',
+      'high': '高画质',
+      'medium': '中画质',
+      'low': '低画质',
+    };
+    buttons.forEach(btn => {
+      const q = btn.dataset.quality;
+      if (q === quality) {
+        btn.style.background = '#6366f1';
+        btn.style.color = '#ffffff';
+        btn.style.fontWeight = '600';
+      } else {
+        btn.style.background = 'transparent';
+        btn.style.color = '#94a3b8';
+        btn.style.fontWeight = '500';
+      }
+    });
+    // 更新标签
+    const labelEl = this.el.querySelector('.quality-current-label');
+    if (labelEl) {
+      labelEl.textContent = labelMap[quality] || '自动';
     }
   }
 
@@ -1158,6 +1288,8 @@ class SettingsPanel {
     if (this.board.highlightSettings) {
       this.board.highlightSettings.sameNumber = this.settings.display.highlightSameNumber;
     }
+    // 应用画质设置
+    this._applyQualitySetting(this.settings.display.quality);
     // showCageSum 和 showCandidates 可能影响渲染
     if (this.renderer && typeof this.renderer.render === 'function') {
       this.renderer.render(this.board);
@@ -1168,10 +1300,34 @@ class SettingsPanel {
     if (!this.board) return;
     if (key === 'highlightSameNumber' && this.board.highlightSettings) {
       this.board.highlightSettings.sameNumber = value;
+    } else if (key === 'quality') {
+      this._applyQualitySetting(value);
     }
     // showCageSum 和 showCandidates：标记后重渲染
     if (this.renderer && typeof this.renderer.render === 'function') {
       this.renderer.render(this.board);
+    }
+  }
+
+  /**
+   * 应用画质设置
+   * @param {string} quality - 'auto' | 'high' | 'medium' | 'low'
+   */
+  _applyQualitySetting(quality) {
+    // 如果有 PerformanceMonitor，通过它来设置
+    if (typeof PerformanceMonitor !== 'undefined') {
+      if (quality === 'auto') {
+        PerformanceMonitor.setQualityLevel(null); // 恢复自动
+      } else {
+        PerformanceMonitor.setQualityLevel(quality); // 手动覆盖
+      }
+    } else if (this.renderer && typeof this.renderer.setQualityLevel === 'function') {
+      // 没有 PerformanceMonitor 时，直接设置 renderer
+      if (quality === 'auto') {
+        this.renderer.setQualityLevel('high'); // 自动模式默认 high
+      } else {
+        this.renderer.setQualityLevel(quality);
+      }
     }
   }
 

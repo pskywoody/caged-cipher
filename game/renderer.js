@@ -528,7 +528,7 @@ class Renderer {
         this._hintAnimState.enabled = true;
         this._animationFrameSkip = 1; // 60fps
         this._simplifiedCageRendering = false;
-        // 热力图保持用户设置，不强制开启
+        this._heatmapRenderingSuspended = false;
         // Canvas 分辨率恢复
         this._canvasQualityScale = 1.0;
         break;
@@ -543,6 +543,7 @@ class Renderer {
         this._hintAnimState.enabled = true;  // 保留提示动画
         this._animationFrameSkip = 2; // 30fps
         this._simplifiedCageRendering = false;
+        this._heatmapRenderingSuspended = false;
         this._canvasQualityScale = 1.0;
         // 清除现有粒子
         if (this._particles && this._particles.length > 0) {
@@ -1926,6 +1927,23 @@ class Renderer {
    */
   playHintAnimation(steps, onStepStart = null, onStepComplete = null, onComplete = null) {
     if (!steps || steps.length === 0) return;
+
+    // P2-3: 低画质下禁用提示动画，直接跳到最终状态
+    if (this._hintAnimState.enabled === false) {
+      // 直接触发所有步骤的开始和完成回调，然后调用 onComplete
+      if (onStepStart) {
+        for (let i = 0; i < steps.length; i++) {
+          onStepStart(i, steps[i]);
+        }
+      }
+      if (onStepComplete) {
+        for (let i = 0; i < steps.length; i++) {
+          onStepComplete(i);
+        }
+      }
+      if (onComplete) onComplete();
+      return;
+    }
 
     const state = this._hintAnimState;
     state.steps = steps;
