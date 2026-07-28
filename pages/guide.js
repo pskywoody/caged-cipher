@@ -1765,7 +1765,11 @@
     // 保存到本地存储
     try {
       localStorage.setItem('boss_difficulty', diff);
-    } catch(e) {}
+    } catch(e) {
+      if (e.name === 'QuotaExceededError' || e.code === 22) {
+        console.warn('[Guide] Storage quota exceeded on difficulty save');
+      }
+    }
 
     // 如果战斗进行中，自动重开
     if (bossBattleStarted && GuideBattle.active) {
@@ -7701,7 +7705,11 @@
     function _saveShownMap(map) {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-      } catch(e) {}
+      } catch(e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          console.warn('[Guide] Storage quota exceeded on shown map save');
+        }
+      }
     }
 
     /**

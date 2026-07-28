@@ -1696,7 +1696,11 @@
     _saveReadHistory() {
       try {
         localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(this._readHistory));
-      } catch (e) {}
+      } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          console.warn('[StoryEngine] Storage quota exceeded on read history save');
+        }
+      }
     }
 
     _checkSceneRead() {
@@ -1739,7 +1743,11 @@
       try {
         const prefs = this._getSkipPrefs();
         localStorage.setItem(SKIP_STORAGE_KEY, JSON.stringify(prefs));
-      } catch (e) {}
+      } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          console.warn('[StoryEngine] Storage quota exceeded on skip prefs save');
+        }
+      }
     }
 
     _getSkipPrefs() {
@@ -1757,7 +1765,11 @@
       try {
         localStorage.setItem(SKIP_STORAGE_KEY, JSON.stringify(prefs));
         this._skipConfirmationShown = true;
-      } catch (e) {}
+      } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          console.warn('[StoryEngine] Storage quota exceeded on skip confirm save');
+        }
+      }
     }
 
     // ============================================================

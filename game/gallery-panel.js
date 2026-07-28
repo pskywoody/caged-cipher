@@ -35,6 +35,7 @@
 
   const PROGRESS_KEY = 'cagedcipher_progress';
   const STORY_READ_KEY = 'cagedcipher_story_read';
+  const STORY_READ_VERSION = 1;
 
   // Tab 定义
   const TABS = [
@@ -266,12 +267,29 @@
     markSceneRead(chapterId, levelId, sceneType) {
       try {
         const raw = localStorage.getItem(STORY_READ_KEY);
-        const readScenes = raw ? JSON.parse(raw) : {};
+        let data = raw ? JSON.parse(raw) : {};
+        // 版本迁移（兼容旧版纯 map 格式）
+        let readScenes;
+        if (data && typeof data.version === 'number' && data.scenes) {
+          readScenes = this._migrateStoryRead(data).scenes;
+        } else {
+          // 旧版格式，直接就是 scenes map
+          readScenes = data || {};
+        }
         const key = chapterId + '_' + levelId + '_' + sceneType;
         readScenes[key] = true;
-        localStorage.setItem(STORY_READ_KEY, JSON.stringify(readScenes));
+        const saveData = {
+          version: STORY_READ_VERSION,
+          scenes: readScenes,
+        };
+        localStorage.setItem(STORY_READ_KEY, JSON.stringify(saveData));
       } catch (e) {
-        console.warn('[GalleryPanel] markSceneRead failed:', e);
+        // 专门处理容量超限错误
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          console.warn('[GalleryPanel] Storage quota exceeded on markSceneRead');
+        } else {
+          console.warn('[GalleryPanel] markSceneRead failed:', e);
+        }
       }
       this.refresh();
     }
@@ -1244,7 +1262,12 @@
         progress.galleryUnlock = this._unlockData;
         localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
       } catch (e) {
-        console.warn('[GalleryPanel] Save failed:', e);
+        // 专门处理容量超限错误
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          console.warn('[GalleryPanel] Storage quota exceeded on save unlock data');
+        } else {
+          console.warn('[GalleryPanel] Save failed:', e);
+        }
       }
     }
 
@@ -1267,9 +1290,46 @@
     _getReadScenes() {
       try {
         const raw = localStorage.getItem(STORY_READ_KEY);
-        if (raw) return JSON.parse(raw);
-      } catch (e) {}
+        if (raw) {
+          const data = JSON.parse(raw);
+          // 版本检测：新版带 version + scenes，旧版直接是 map
+          if (data && typeof data.version === 'number' && data.scenes) {
+            return this._migrateStoryRead(data).scenes;
+          }
+          // 旧版格式
+          return data || {};
+        }
+      } catch (e) {
+        console.warn('[GalleryPanel] _getReadScenes failed:', e);
+      }
       return {};
+    }
+
+    /**
+     * 剧情已读数据版本迁移框架
+     * @param {Object} data - 从 localStorage 读取的原始数据（带 version）
+     * @returns {Object} 迁移后的数据
+     */
+    _migrateStoryRead(data) {
+      if (!data || typeof data.version !== 'number') {
+        return { version: STORY_READ_VERSION, scenes: data || {} };
+      }
+
+      let version = data.version;
+
+      // v0 → v1: 暂无实际迁移内容，建立框架
+      if (version < 1) {
+        version = 1;
+        // 预留 v1 迁移逻辑
+      }
+
+      // 未来版本迁移在此添加
+      // if (version < 2) { version = 2; /* v2 迁移 */ }
+      // if (version < 3) { version = 3; /* v3 迁移 */ }
+
+      data.version = version;
+      if (!data.scenes) data.scenes = {};
+      return data;
     }
 
     _getAllCharacters() {

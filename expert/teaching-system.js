@@ -289,6 +289,7 @@
   //  Storage key
   // ========================================================
   const STORAGE_KEY = 'cagemaster3_teaching_progress';
+  const CURRENT_VERSION = 1;
 
   // ========================================================
   //  TeachingSystem class
@@ -509,7 +510,7 @@
     save() {
       try {
         const data = {
-          version: 1,
+          version: CURRENT_VERSION,
           techniques: this._techniques,
           playerLevel: this._playerLevel,
         };
@@ -520,7 +521,12 @@
         }
         return true;
       } catch (e) {
-        console.warn('TeachingSystem save failed:', e);
+        // 专门处理容量超限错误
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          console.warn('[TeachingSystem] Storage quota exceeded on save');
+        } else {
+          console.warn('[TeachingSystem] Save failed:', e);
+        }
         return false;
       }
     }
@@ -537,7 +543,11 @@
         }
         if (!json) return false;
 
-        const data = JSON.parse(json);
+        let data = JSON.parse(json);
+
+        // 版本检测与迁移
+        data = this._migrate(data);
+
         if (data.techniques) {
           // 向后兼容：将旧技巧ID转换为新ID
           const normalized = {};
@@ -554,9 +564,41 @@
         }
         return true;
       } catch (e) {
-        console.warn('TeachingSystem load failed:', e);
+        console.warn('[TeachingSystem] Load failed:', e);
         return false;
       }
+    }
+
+    /**
+     * 版本迁移框架
+     * @param {Object} data - 从 localStorage 读取的原始数据
+     * @returns {Object} 迁移后的数据
+     */
+    _migrate(data) {
+      // 无 version 字段说明是旧版（v0），直接包一层
+      if (!data || typeof data.version !== 'number') {
+        return {
+          version: CURRENT_VERSION,
+          techniques: data?.techniques || {},
+          playerLevel: data?.playerLevel || 1,
+        };
+      }
+
+      let version = data.version;
+
+      // v0 → v1: 暂无实际迁移内容，建立框架
+      if (version < 1) {
+        version = 1;
+        // 预留 v1 迁移逻辑
+      }
+
+      // 未来版本迁移在此添加
+      // if (version < 2) { version = 2; /* v2 迁移 */ }
+      // if (version < 3) { version = 3; /* v3 迁移 */ }
+
+      data.version = version;
+      if (!data.techniques) data.techniques = {};
+      return data;
     }
 
     /**

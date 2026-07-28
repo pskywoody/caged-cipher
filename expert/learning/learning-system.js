@@ -5,6 +5,7 @@
   'use strict';
 
   const STORAGE_KEY = 'cagemaster3_learning';
+  const CURRENT_VERSION = 1;
 
   class LearningSystem {
     constructor() {
@@ -128,19 +129,63 @@
     _load() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) return JSON.parse(raw);
-      } catch(e) {}
+        if (raw) {
+          let data = JSON.parse(raw);
+          // 版本检测与迁移
+          data = this._migrate(data);
+          return data;
+        }
+      } catch(e) {
+        console.warn('[LearningSystem] Load failed:', e);
+      }
       return this._defaultData();
     }
 
     _save() {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(this._data));
-      } catch(e) {}
+        const data = Object.assign({}, this._data, { version: CURRENT_VERSION });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      } catch(e) {
+        // 专门处理容量超限错误
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          console.warn('[LearningSystem] Storage quota exceeded on save');
+        } else {
+          console.warn('[LearningSystem] Save failed:', e);
+        }
+      }
+    }
+
+    /**
+     * 版本迁移框架
+     * @param {Object} data - 从 localStorage 读取的原始数据
+     * @returns {Object} 迁移后的数据
+     */
+    _migrate(data) {
+      // 无 version 字段说明是旧版（v0），用默认数据补齐并设置版本
+      if (!data || typeof data.version !== 'number') {
+        const defaultData = this._defaultData();
+        return Object.assign(defaultData, data || {}, { version: CURRENT_VERSION });
+      }
+
+      let version = data.version;
+
+      // v0 → v1: 暂无实际迁移内容，建立框架
+      if (version < 1) {
+        version = 1;
+        // 预留 v1 迁移逻辑
+      }
+
+      // 未来版本迁移在此添加
+      // if (version < 2) { version = 2; /* v2 迁移 */ }
+      // if (version < 3) { version = 3; /* v3 迁移 */ }
+
+      data.version = version;
+      return data;
     }
 
     _defaultData() {
       return {
+        version: CURRENT_VERSION,
         totalFills: 0,
         correctFills: 0,
         hintsUsed: 0,

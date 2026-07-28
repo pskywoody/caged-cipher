@@ -95,7 +95,7 @@ const BOSS_CONFIGS = {
       maxTechLevel: 4,         // 降到4级（只用到星衡法则级别）
       discoveryMultiplier: 0.7,  // 发现率打7折，AI更"慢半拍"
       speedMultiplier: 1.5,     // 速度再慢50%（delay乘以1.5）
-      mistakeMultiplier: 2.0,    // 失误率提高到2倍
+      mistakeMultiplier: 1.7,    // 失误率提高到1.7倍，保持一定挑战性
       interceptMultiplier: 0.3,  // 拦截欲望降到30%，减少打断思路
     },
     // 杀手数独专属：Boss战机制调整
@@ -266,8 +266,8 @@ const BOSS_CONFIGS = {
     name: '沈墨',
     portrait: 'SM_01_沉静.png',
     color: '#fbbf24',
-    speedMin: 700,
-    speedMax: 1400,
+    speedMin: 800,
+    speedMax: 1500,
     mistakeChance: 0.002,
     personality: '沉静如水的最终对手，深不可测',
     preDialog: [
@@ -368,7 +368,7 @@ const GuideBattle = {
     // 目标：AI速度 ≈ 玩家速度的 1.2~1.5倍（玩家略快，有优势）
     targetRatio: 1.3,
     // 最小/最大速度倍率（防止太极端）
-    minMultiplier: 0.5,   // AI最快只能到基准速度的50%
+    minMultiplier: 0.7,   // AI最快只能到基准速度的70%，防止碾压式过快
     maxMultiplier: 2.5,   // AI最慢可以到基准速度的250%
     // 平滑系数（每次调整变化不超过这个比例）
     smoothFactor: 0.15,
@@ -3336,6 +3336,7 @@ const GuideBattle = {
   // ======================================================
 
   STATS_KEY: 'cagemaster_battle_stats',
+  STATS_VERSION: 1,
 
   /**
    * 记录本次战斗数据
@@ -3420,9 +3421,17 @@ const GuideBattle = {
   _loadStats() {
     try {
       const data = localStorage.getItem(this.STATS_KEY);
-      if (data) return JSON.parse(data);
-    } catch (e) {}
+      if (data) {
+        let parsed = JSON.parse(data);
+        // 版本检测与迁移
+        parsed = this._migrateStats(parsed);
+        return parsed;
+      }
+    } catch (e) {
+      console.warn('[GuideBattle] Stats load failed:', e);
+    }
     return {
+      version: this.STATS_VERSION,
       total: { battles: 0, wins: 0, losses: 0, bestCombo: 0 },
       bosses: {},
       recent: [],
@@ -3430,13 +3439,51 @@ const GuideBattle = {
   },
 
   /**
+   * 战绩数据版本迁移框架
+   */
+  _migrateStats(data) {
+    // 无 version 字段说明是旧版（v0），设置默认版本
+    if (!data || typeof data.version !== 'number') {
+      return {
+        version: this.STATS_VERSION,
+        total: data?.total || { battles: 0, wins: 0, losses: 0, bestCombo: 0 },
+        bosses: data?.bosses || {},
+        recent: data?.recent || [],
+      };
+    }
+
+    let version = data.version;
+
+    // v0 → v1: 暂无实际迁移内容，建立框架
+    if (version < 1) {
+      version = 1;
+      // 预留 v1 迁移逻辑
+    }
+
+    // 未来版本迁移在此添加
+    // if (version < 2) { version = 2; /* v2 迁移 */ }
+
+    data.version = version;
+    if (!data.total) data.total = { battles: 0, wins: 0, losses: 0, bestCombo: 0 };
+    if (!data.bosses) data.bosses = {};
+    if (!data.recent) data.recent = [];
+    return data;
+  },
+
+  /**
    * 保存战绩数据
    */
   _saveStats(stats) {
     try {
-      localStorage.setItem(this.STATS_KEY, JSON.stringify(stats));
+      const data = Object.assign({}, stats, { version: this.STATS_VERSION });
+      localStorage.setItem(this.STATS_KEY, JSON.stringify(data));
     } catch (e) {
-      console.warn('[GuideBattle] 战绩保存失败:', e);
+      // 专门处理容量超限错误
+      if (e.name === 'QuotaExceededError' || e.code === 22) {
+        console.warn('[GuideBattle] Storage quota exceeded on stats save');
+      } else {
+        console.warn('[GuideBattle] 战绩保存失败:', e);
+      }
     }
   },
 
@@ -3470,6 +3517,7 @@ const GuideBattle = {
   // ======================================================
 
   _comedyKey: 'cagemaster_comedy_achievements',
+  _comedyVersion: 1,
 
   /**
    * 检测喜剧成就（战斗结束时触发）
@@ -3613,15 +3661,60 @@ const GuideBattle = {
   _loadComedyAchievements() {
     try {
       const data = localStorage.getItem(this._comedyKey);
-      if (data) return JSON.parse(data);
-    } catch (e) {}
+      if (data) {
+        let parsed = JSON.parse(data);
+        // 版本检测与迁移
+        parsed = this._migrateComedyAchievements(parsed);
+        return parsed.achievements || parsed;
+      }
+    } catch (e) {
+      console.warn('[GuideBattle] Comedy achievements load failed:', e);
+    }
     return {};
+  },
+
+  /**
+   * 喜剧成就数据版本迁移框架
+   */
+  _migrateComedyAchievements(data) {
+    // 无 version 字段说明是旧版（v0），包一层
+    if (!data || typeof data.version !== 'number') {
+      return {
+        version: this._comedyVersion,
+        achievements: data || {},
+      };
+    }
+
+    let version = data.version;
+
+    // v0 → v1: 暂无实际迁移内容，建立框架
+    if (version < 1) {
+      version = 1;
+      // 预留 v1 迁移逻辑
+    }
+
+    // 未来版本迁移在此添加
+    // if (version < 2) { version = 2; /* v2 迁移 */ }
+
+    data.version = version;
+    if (!data.achievements) data.achievements = {};
+    return data;
   },
 
   _saveComedyAchievements(achievements) {
     try {
-      localStorage.setItem(this._comedyKey, JSON.stringify(achievements));
-    } catch (e) {}
+      const data = {
+        version: this._comedyVersion,
+        achievements: achievements,
+      };
+      localStorage.setItem(this._comedyKey, JSON.stringify(data));
+    } catch (e) {
+      // 专门处理容量超限错误
+      if (e.name === 'QuotaExceededError' || e.code === 22) {
+        console.warn('[GuideBattle] Storage quota exceeded on comedy save');
+      }
+      // 非关键数据，静默失败
+    }
   },
 
   /**

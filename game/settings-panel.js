@@ -134,12 +134,24 @@ class SettingsPanel {
     }
   }
 
+  // === 版本迁移 ===
+  static get CURRENT_VERSION() { return 1; }
+
   save() {
     try {
-      localStorage.setItem('game_settings', JSON.stringify(this.settings));
+      const data = {
+        version: SettingsPanel.CURRENT_VERSION,
+        settings: this.settings,
+      };
+      localStorage.setItem('game_settings', JSON.stringify(data));
       return true;
     } catch (e) {
-      console.warn('[SettingsPanel] Save failed:', e);
+      // 专门处理容量超限错误
+      if (e.name === 'QuotaExceededError' || e.code === 22) {
+        console.warn('[SettingsPanel] Storage quota exceeded on save');
+      } else {
+        console.warn('[SettingsPanel] Save failed:', e);
+      }
       return false;
     }
   }
@@ -148,8 +160,10 @@ class SettingsPanel {
     try {
       const saved = localStorage.getItem('game_settings');
       if (saved) {
-        const parsed = JSON.parse(saved);
-        this.settings = this._mergeDeep(this._deepClone(this.defaults), parsed);
+        let parsed = JSON.parse(saved);
+        // 版本检测与迁移
+        parsed = this._migrate(parsed);
+        this.settings = this._mergeDeep(this._deepClone(this.defaults), parsed.settings || parsed);
         this._applyAll();
         this._updateUI();
       } else {
@@ -160,6 +174,37 @@ class SettingsPanel {
       console.warn('[SettingsPanel] Load failed:', e);
       return false;
     }
+  }
+
+  /**
+   * 版本迁移框架
+   * @param {Object} data - 从 localStorage 读取的原始数据
+   * @returns {Object} 迁移后的数据（保证有 version 和 settings 字段）
+   */
+  _migrate(data) {
+    // 无 version 字段说明是旧版（v0），直接包一层
+    if (!data || typeof data.version !== 'number') {
+      return {
+        version: SettingsPanel.CURRENT_VERSION,
+        settings: data || {},
+      };
+    }
+
+    let version = data.version;
+
+    // v0 → v1: 暂无实际迁移内容，建立框架
+    if (version < 1) {
+      version = 1;
+      // 预留 v1 迁移逻辑
+    }
+
+    // 未来版本迁移在此添加 case
+    // if (version < 2) { version = 2; /* v2 迁移 */ }
+    // if (version < 3) { version = 3; /* v3 迁移 */ }
+
+    data.version = version;
+    if (!data.settings) data.settings = {};
+    return data;
   }
 
   get(key) {
@@ -1195,13 +1240,25 @@ class SettingsPanel {
           try {
             const data = JSON.parse(ev.target.result);
             if (confirm('导入将覆盖当前所有进度，确定继续吗？')) {
+              let quotaError = false;
               for (const key in data) {
                 if (data.hasOwnProperty(key)) {
-                  localStorage.setItem(key, data[key]);
+                  try {
+                    localStorage.setItem(key, data[key]);
+                  } catch (setErr) {
+                    if (setErr.name === 'QuotaExceededError' || setErr.code === 22) {
+                      quotaError = true;
+                      console.warn('[SettingsPanel] Import quota exceeded at key:', key);
+                    }
+                  }
                 }
               }
               if (typeof AudioService !== 'undefined') AudioService.sfx.play('success');
-              alert('导入成功！页面将刷新。');
+              if (quotaError) {
+                alert('导入完成，但存储空间不足，部分数据可能未保存。\n建议清理浏览器缓存后重试。');
+              } else {
+                alert('导入成功！页面将刷新。');
+              }
               window.location.reload();
             }
           } catch (err) {

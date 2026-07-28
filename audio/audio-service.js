@@ -116,6 +116,16 @@
       this._audioEl = null;
       this._unlocked = false;
       this._pendingBgm = null;
+      this._pendingBgmOptions = null;
+
+      // BGM Web Audio state
+      this._bgmTrack = null;       // { el, source, gain, path } — current active BGM track
+      this._bgmFadingOut = [];     // array of tracks currently fading out
+
+      // Ducking state
+      this._duckingActive = false;
+      this._sfxGainBeforeDuck = 0;
+      this._bgmGainBeforeDuck = 0;
 
       // SFX state (Web Audio based)
       this._sfxCache = new Map();
@@ -148,13 +158,13 @@
         this.voiceGain.gain.value = this._volumes.voice;
         this.voiceGain.connect(this.masterGain);
 
-        this.bgmGain = this.ctx.createGain();
-        this.bgmGain.gain.value = this._volumes.bgm;
         this.bgmFilter = this.ctx.createBiquadFilter();
         this.bgmFilter.type = 'lowpass';
         this.bgmFilter.frequency.value = 20000;
-        this.bgmGain.connect(this.bgmFilter);
-        this.bgmFilter.connect(this.masterGain);
+        this.bgmGain = this.ctx.createGain();
+        this.bgmGain.gain.value = this._volumes.bgm;
+        this.bgmFilter.connect(this.bgmGain);
+        this.bgmGain.connect(this.masterGain);
 
         console.log('[AudioService] Initialized');
 
@@ -184,20 +194,26 @@
         if (type === 'master' && this.masterGain) {
           this.masterGain.gain.linearRampToValueAtTime(value, now + 0.05);
         } else if (type === 'sfx' && this.sfxGain) {
-          this.sfxGain.gain.linearRampToValueAtTime(value, now + 0.05);
+          const target = this._duckingActive ? value * 0.5 : value;
+          this.sfxGain.gain.cancelScheduledValues(now);
+          this.sfxGain.gain.setValueAtTime(this.sfxGain.gain.value, now);
+          this.sfxGain.gain.linearRampToValueAtTime(target, now + 0.05);
+          // Update duck baseline so restoration returns to the new volume
+          if (this._duckingActive) {
+            this._sfxGainBeforeDuck = value;
+          }
         } else if (type === 'voice' && this.voiceGain) {
           this.voiceGain.gain.linearRampToValueAtTime(value, now + 0.05);
         } else if (type === 'bgm' && this.bgmGain) {
-          this.bgmGain.gain.linearRampToValueAtTime(value, now + 0.05);
+          const target = this._duckingActive ? value * 0.7 : value;
+          this.bgmGain.gain.cancelScheduledValues(now);
+          this.bgmGain.gain.setValueAtTime(this.bgmGain.gain.value, now);
+          this.bgmGain.gain.linearRampToValueAtTime(target, now + 0.05);
+          // Update duck baseline so restoration returns to the new volume
+          if (this._duckingActive) {
+            this._bgmGainBeforeDuck = value;
+          }
         }
-      }
-
-      // Also update HTML Audio elements for BGM fallback
-      if (type === 'bgm' && this._currentBgm) {
-        this._currentBgm.volume = value * this._volumes.master;
-      }
-      if (type === 'master' && this._currentBgm) {
-        this._currentBgm.volume = this._volumes.bgm * value;
       }
     }
 
@@ -220,7 +236,11 @@
     _saveVolumes() {
       try {
         localStorage.setItem(VOLUME_KEY, JSON.stringify(this._volumes));
-      } catch(e) {}
+      } catch(e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          console.warn('[AudioService] Storage quota exceeded on volume save');
+        }
+      }
     }
 
     // === SFX ===
@@ -395,22 +415,36 @@
         const path = BGM_DIR + filename;
         this._playBgm(path);
       },
-      stop: () => {
+      stop: (fadeMs) => {
+        if (fadeMs === undefined) fadeMs = 200;
+        if (!this._bgmTrack && !this.bgmPlaying) return;
+
         this.bgmPlaying = false;
-        if (this._currentBgm) {
-          this._currentBgm.pause();
+        this._pendingBgm = null;
+
+        if (this._bgmTrack) {
+          const oldTrack = this._bgmTrack;
+          this._bgmTrack = null;
           this._currentBgm = null;
+          this._fadeOutAndDisposeTrack(oldTrack, fadeMs);
+        }
+
+        // Also stop any fading-out tracks immediately if fadeMs is 0
+        if (fadeMs === 0) {
+          while (this._bgmFadingOut.length) {
+            this._disposeBgmTrack(this._bgmFadingOut.pop());
+          }
         }
       },
       pause: () => {
-        if (!this._currentBgm || !this.bgmPlaying) return;
-        this._currentBgm.pause();
+        if (!this._bgmTrack || !this.bgmPlaying) return;
+        try { this._bgmTrack.el.pause(); } catch(e) {}
         this.bgmPlaying = false;
       },
       resume: () => {
-        if (!this._currentBgm || this.bgmPlaying) return;
+        if (!this._bgmTrack || this.bgmPlaying) return;
         if (!this.enabled || !this.bgmEnabled) return;
-        this._currentBgm.play().then(() => {
+        this._bgmTrack.el.play().then(() => {
           this.bgmPlaying = true;
         }).catch((e) => {
           console.warn('[AudioService] BGM resume failed:', e);
@@ -423,16 +457,28 @@
         const volumeMap = { Muted: 0.03, Normal: 0.15, Intense: 0.3, Eureka: 0.5 };
         const filterMap = { Muted: 300, Normal: 20000, Intense: 20000, Eureka: 20000 };
 
-        const targetVol = (volumeMap[intensity] || 0.15) * this._volumes.bgm;
+        let targetVol = (volumeMap[intensity] || 0.15) * this._volumes.bgm;
         const targetFreq = filterMap[intensity] || 20000;
 
+        // Apply ducking factor if ducking is active
+        if (this._duckingActive) {
+          targetVol *= 0.7;
+        }
+
         const now = this.ctx.currentTime;
+        this.bgmGain.gain.cancelScheduledValues(now);
+        this.bgmGain.gain.setValueAtTime(this.bgmGain.gain.value, now);
         this.bgmGain.gain.linearRampToValueAtTime(targetVol, now + fadeMs / 1000);
+
+        this.bgmFilter.frequency.cancelScheduledValues(now);
+        this.bgmFilter.frequency.setValueAtTime(this.bgmFilter.frequency.value, now);
         this.bgmFilter.frequency.linearRampToValueAtTime(targetFreq, now + fadeMs / 1000);
       },
       setLowPass: (freq, duration = 500) => {
         if (!this.ctx || !this.bgmFilter) return;
         const now = this.ctx.currentTime;
+        this.bgmFilter.frequency.cancelScheduledValues(now);
+        this.bgmFilter.frequency.setValueAtTime(this.bgmFilter.frequency.value, now);
         this.bgmFilter.frequency.linearRampToValueAtTime(freq, now + duration / 1000);
       },
       setVolume: (v) => this.setVolume('bgm', v),
@@ -456,8 +502,9 @@
           const volume = (options.volume !== undefined) ? options.volume : 0.6;
           const fadeIn = options.fadeIn !== false;
 
-          this.bgm.stop();
+          // Boss BGM uses crossfade like normal BGM, but with custom volume
           this._pendingBgm = path;
+          this._pendingBgmOptions = { volume: volume, fadeIn: fadeIn };
 
           if (this._unlocked) {
             this._playBgmNow(path, { volume: volume, fadeIn: fadeIn });
@@ -474,12 +521,12 @@
       stopBoss: (fadeOutMs) => {
         try {
           if (fadeOutMs === undefined) fadeOutMs = 500;
-          if (!this._currentBgm || !this.bgmPlaying) {
-            this.bgm.stop();
+          if (!this._bgmTrack || !this.bgmPlaying) {
+            this.bgm.stop(fadeOutMs);
             return;
           }
 
-          // 淡出效果
+          // Fade out the BGM bus gain to 0, then stop
           if (this.ctx && this.bgmGain && fadeOutMs > 0) {
             const now = this.ctx.currentTime;
             const currentGain = this.bgmGain.gain.value;
@@ -488,19 +535,21 @@
             this.bgmGain.gain.linearRampToValueAtTime(0, now + fadeOutMs / 1000);
 
             setTimeout(() => {
-              this.bgm.stop();
-              // 恢复 bgmGain 音量设置
-              if (this.bgmGain) {
-                this.bgmGain.gain.setValueAtTime(this._volumes.bgm, this.ctx.currentTime);
+              this.bgm.stop(0);
+              // Restore bgmGain to user setting for next playback
+              if (this.bgmGain && this.ctx) {
+                const t = this.ctx.currentTime;
+                this.bgmGain.gain.cancelScheduledValues(t);
+                this.bgmGain.gain.setValueAtTime(this._volumes.bgm, t);
               }
             }, fadeOutMs);
           } else {
-            this.bgm.stop();
+            this.bgm.stop(0);
           }
         } catch (e) {
           console.debug('[AudioService] bgm.stopBoss failed:', e.message);
-          // 兜底：直接停止
-          try { this.bgm.stop(); } catch(e2) {}
+          // Fallback: stop immediately
+          try { this.bgm.stop(0); } catch(e2) {}
         }
       },
     };
@@ -650,7 +699,12 @@
         gainNode.gain.setValueAtTime(targetGain, now);
       }
 
+      // Start ducking: lower SFX (-6dB) and BGM (-3dB) while voice plays
+      this._startDucking();
+
       source.onended = () => {
+        // Restore ducking first
+        this._endDucking();
         // Only fire onended for natural completion (not forced stop)
         if (!this._voiceStopping && onended) {
           try { onended(); } catch(e) { console.warn('[AudioService] voice onended error:', e); }
@@ -685,6 +739,9 @@
       this._voiceGainNode = null;
       this._voiceOnEnded = null;
 
+      // Restore ducking immediately (with fade)
+      this._endDucking();
+
       try {
         const now = this.ctx.currentTime;
         const currentGain = gainNode.gain.value;
@@ -705,6 +762,106 @@
       }
     }
 
+    // --- Ducking: lower SFX and BGM while voice plays ---
+    _startDucking() {
+      if (!this.ctx || this._duckingActive) return;
+      this._duckingActive = true;
+      const now = this.ctx.currentTime;
+
+      // Duck SFX: -6dB (multiply by 0.5), 150ms ramp
+      if (this.sfxGain) {
+        const currentVal = this.sfxGain.gain.value;
+        this._sfxGainBeforeDuck = currentVal;
+        this.sfxGain.gain.cancelScheduledValues(now);
+        this.sfxGain.gain.setValueAtTime(currentVal, now);
+        this.sfxGain.gain.linearRampToValueAtTime(currentVal * 0.5, now + 0.15);
+      }
+
+      // Duck BGM: -3dB (multiply by 0.7), 150ms ramp
+      if (this.bgmGain) {
+        const currentVal = this.bgmGain.gain.value;
+        this._bgmGainBeforeDuck = currentVal;
+        this.bgmGain.gain.cancelScheduledValues(now);
+        this.bgmGain.gain.setValueAtTime(currentVal, now);
+        this.bgmGain.gain.linearRampToValueAtTime(currentVal * 0.7, now + 0.15);
+      }
+    }
+
+    _endDucking() {
+      if (!this.ctx || !this._duckingActive) return;
+      this._duckingActive = false;
+      const now = this.ctx.currentTime;
+
+      // Restore SFX, 150ms ramp
+      if (this.sfxGain) {
+        const currentVal = this.sfxGain.gain.value;
+        // _sfxGainBeforeDuck stores the pre-duck gain value.
+        // If setVolume was called during ducking, it was updated to the new base volume.
+        const restoreTarget = this._sfxGainBeforeDuck || this._volumes.sfx;
+        this.sfxGain.gain.cancelScheduledValues(now);
+        this.sfxGain.gain.setValueAtTime(currentVal, now);
+        this.sfxGain.gain.linearRampToValueAtTime(restoreTarget, now + 0.15);
+      }
+
+      // Restore BGM, 150ms ramp
+      if (this.bgmGain) {
+        const currentVal = this.bgmGain.gain.value;
+        const restoreTarget = this._bgmGainBeforeDuck || this._volumes.bgm;
+        this.bgmGain.gain.cancelScheduledValues(now);
+        this.bgmGain.gain.setValueAtTime(currentVal, now);
+        this.bgmGain.gain.linearRampToValueAtTime(restoreTarget, now + 0.15);
+      }
+    }
+
+    // --- BGM track management ---
+    _createBgmTrack(path, options) {
+      options = options || {};
+      const audio = new Audio(path);
+      audio.loop = true;
+      // Set element volume to max — all volume control done via Web Audio gain
+      audio.volume = 1;
+
+      const source = this.ctx.createMediaElementSource(audio);
+      const trackGain = this.ctx.createGain();
+      trackGain.gain.value = (options.startAtZero) ? 0 : 1;
+
+      // Signal chain: source → trackGain → bgmFilter → bgmGain → masterGain
+      source.connect(trackGain);
+      trackGain.connect(this.bgmFilter);
+
+      return { el: audio, source: source, gain: trackGain, path: path };
+    }
+
+    _disposeBgmTrack(track) {
+      if (!track) return;
+      try { track.gain.disconnect(); } catch(e) {}
+      try { track.source.disconnect(); } catch(e) {}
+      try { track.el.pause(); } catch(e) {}
+      try { track.el.src = ''; } catch(e) {}
+    }
+
+    _fadeOutAndDisposeTrack(track, fadeMs) {
+      if (!track || !this.ctx) {
+        this._disposeBgmTrack(track);
+        return;
+      }
+      const now = this.ctx.currentTime;
+      const currentGain = track.gain.gain.value;
+      try {
+        track.gain.gain.cancelScheduledValues(now);
+        track.gain.gain.setValueAtTime(currentGain, now);
+        track.gain.gain.linearRampToValueAtTime(0, now + fadeMs / 1000);
+      } catch(e) {}
+
+      const trackRef = track;
+      setTimeout(() => {
+        this._disposeBgmTrack(trackRef);
+        // Remove from fadingOut array if present
+        const idx = this._bgmFadingOut.indexOf(trackRef);
+        if (idx >= 0) this._bgmFadingOut.splice(idx, 1);
+      }, fadeMs + 20);
+    }
+
     // Legacy HTML Audio voice playback (kept for reference, no longer used)
     _playVoice(path) {
       if (this._audioEl) {
@@ -717,9 +874,9 @@
     }
 
     _playBgm(path) {
-      this.bgm.stop();
       this._pendingBgm = path;
-      // If already interacted, play immediately
+      this._pendingBgmOptions = null;
+      // If already interacted, play immediately with crossfade
       if (this._unlocked) {
         this._playBgmNow(path);
       }
@@ -728,44 +885,92 @@
 
     _playBgmNow(path, options) {
       try {
+        if (!this.ctx) {
+          this.init();
+          if (!this.ctx) return;
+        }
         options = options || {};
         console.log('[AudioService] Playing BGM:', path);
-        const audio = new Audio(path);
-        audio.loop = true;
 
-        // 使用自定义音量或默认音量
-        const baseVolume = (options.volume !== undefined) ? options.volume : this._volumes.bgm;
-        const targetVolume = baseVolume * this._volumes.master;
-
-        if (options.fadeIn) {
-          // 淡入：从 0 开始
-          audio.volume = 0;
-        } else {
-          audio.volume = targetVolume;
+        // If same track is already playing, do nothing
+        if (this._bgmTrack && this._bgmTrack.path === path && this.bgmPlaying) {
+          console.log('[AudioService] BGM already playing, skipping:', path);
+          return;
         }
 
-        this._currentBgm = audio;
+        const fadeIn = options.fadeIn !== false; // default true
+        const hasExisting = !!this._bgmTrack;
+
+        // Create new track (start at 0 if we're crossfading or fadeIn is requested)
+        const newTrack = this._createBgmTrack(path, { startAtZero: hasExisting || fadeIn });
+
+        // Move current track to fading-out state
+        if (this._bgmTrack) {
+          const oldTrack = this._bgmTrack;
+          this._bgmFadingOut.push(oldTrack);
+          this._fadeOutAndDisposeTrack(oldTrack, 800);
+        }
+
+        this._bgmTrack = newTrack;
+        this._currentBgm = newTrack.el; // keep for backward compat
         this.bgmPlaying = true;
 
-        audio.play().then(() => {
+        // If a custom volume is provided (e.g. Boss BGM), set bgmGain to it
+        if (options.volume !== undefined) {
+          const now = this.ctx.currentTime;
+          const targetVol = this._duckingActive ? options.volume * 0.7 : options.volume;
+          this.bgmGain.gain.cancelScheduledValues(now);
+          this.bgmGain.gain.setValueAtTime(targetVol, now);
+        } else if (this.bgmGain && this.bgmGain.gain.value < 0.001) {
+          // Reset bgmGain to user volume if it was faded down by stopBoss
+          const now = this.ctx.currentTime;
+          const targetVol = this._duckingActive ? this._volumes.bgm * 0.7 : this._volumes.bgm;
+          this.bgmGain.gain.cancelScheduledValues(now);
+          this.bgmGain.gain.setValueAtTime(targetVol, now);
+        }
+
+        newTrack.el.play().then(() => {
+          // If track was replaced before playback started, skip fade-in
+          if (this._bgmTrack !== newTrack) {
+            console.log('[AudioService] BGM track obsolete before play started, skipping fade-in');
+            return;
+          }
           console.log('[AudioService] BGM playing successfully');
-          // 淡入效果
-          if (options.fadeIn) {
-            const fadeDuration = 800; // ms
-            const startTime = Date.now();
-            const fadeInterval = setInterval(() => {
-              const elapsed = Date.now() - startTime;
-              const progress = Math.min(1, elapsed / fadeDuration);
-              if (audio && this._currentBgm === audio) {
-                audio.volume = targetVolume * progress;
-              }
-              if (progress >= 1) {
-                clearInterval(fadeInterval);
-              }
-            }, 30);
+          const now = this.ctx.currentTime;
+
+          if (hasExisting) {
+            // Crossfade: new track fades in over 800ms with 30% overlap
+            // Old track started fading at t=0, finishes at t=800ms
+            // New track starts fading in at t = 800 * (1 - 0.3) = 560ms
+            // Overlap period: 560ms to 800ms = 240ms (30% of 800ms)
+            const fadeDuration = 0.8; // seconds
+            const overlapRatio = 0.3;
+            const delay = fadeDuration * (1 - overlapRatio); // 0.56s
+
+            newTrack.gain.gain.cancelScheduledValues(now);
+            newTrack.gain.gain.setValueAtTime(0, now);
+            newTrack.gain.gain.setValueAtTime(0, now + delay);
+            newTrack.gain.gain.linearRampToValueAtTime(1, now + delay + fadeDuration);
+          } else if (fadeIn) {
+            // Simple fade-in from 0, 800ms
+            const fadeDuration = 0.8;
+            newTrack.gain.gain.cancelScheduledValues(now);
+            newTrack.gain.gain.setValueAtTime(0, now);
+            newTrack.gain.gain.linearRampToValueAtTime(1, now + fadeDuration);
+          } else {
+            // No fade, start at full volume
+            newTrack.gain.gain.cancelScheduledValues(now);
+            newTrack.gain.gain.setValueAtTime(1, now);
           }
         }).catch((e) => {
           console.warn('[AudioService] BGM play failed:', e.message);
+          // Clean up on failure
+          if (this._bgmTrack === newTrack) {
+            this._disposeBgmTrack(newTrack);
+            this._bgmTrack = null;
+            this._currentBgm = null;
+            this.bgmPlaying = false;
+          }
         });
       } catch(e) {
         console.error('[AudioService] BGM error:', e);
@@ -776,8 +981,9 @@
       if (this._unlocked) {
         // Already unlocked, but may have pending BGM
         if (this._pendingBgm && !this.bgmPlaying) {
-          this._playBgmNow(this._pendingBgm);
+          this._playBgmNow(this._pendingBgm, this._pendingBgmOptions || {});
           this._pendingBgm = null;
+          this._pendingBgmOptions = null;
         }
         return;
       }
@@ -787,8 +993,9 @@
       // Play pending BGM if any
       if (this._pendingBgm) {
         console.log('[AudioService] Playing pending BGM:', this._pendingBgm);
-        this._playBgmNow(this._pendingBgm);
+        this._playBgmNow(this._pendingBgm, this._pendingBgmOptions || {});
         this._pendingBgm = null;
+        this._pendingBgmOptions = null;
       }
     }
 

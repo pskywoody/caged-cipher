@@ -350,7 +350,80 @@
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(this._data));
       } catch (e) {
-        console.warn('[ProgressManager] Save failed:', e);
+        // 专门处理容量超限错误
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          console.warn('[ProgressManager] Storage quota exceeded, attempting cleanup...');
+          // 清理非关键数据以释放空间
+          this._cleanupNonCriticalData();
+          // 清理后重试保存
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(this._data));
+            console.log('[ProgressManager] Save succeeded after cleanup');
+            return;
+          } catch (e2) {
+            console.warn('[ProgressManager] Save still failed after cleanup:', e2);
+          }
+          // 仍然失败，显示提示
+          this._showStorageWarningToast();
+        } else {
+          console.warn('[ProgressManager] Save failed:', e);
+        }
+      }
+    },
+
+    /**
+     * 清理非关键数据以释放存储空间
+     * 优先级：教学系统缓存 > 学习系统数据 > 喜剧成就缓存
+     */
+    _cleanupNonCriticalData() {
+      const nonCriticalKeys = [
+        'cagemaster3_teaching_progress',  // 教学系统缓存（可重新触发）
+        'cagemaster3_learning',           // 学习系统数据（非关键进度）
+        'cagemaster_comedy_achievements', // 喜剧成就缓存（可重新解锁）
+      ];
+      let freed = 0;
+      for (const key of nonCriticalKeys) {
+        try {
+          const val = localStorage.getItem(key);
+          if (val) {
+            freed += val.length;
+            localStorage.removeItem(key);
+            console.log('[ProgressManager] Cleaned up non-critical key:', key,
+              '~' + Math.round(val.length / 1024) + 'KB');
+          }
+        } catch (e) {
+          // 忽略单个 key 的清理错误
+        }
+      }
+      if (freed > 0) {
+        console.log('[ProgressManager] Total freed ~' + Math.round(freed / 1024) + 'KB');
+      }
+    },
+
+    /**
+     * 显示存储空间不足提示 Toast
+     */
+    _showStorageWarningToast() {
+      try {
+        const toast = document.createElement('div');
+        toast.style.cssText = 'position:fixed;top:20%;left:50%;' +
+          'transform:translate(-50%,-50%);' +
+          'background:linear-gradient(180deg, #2d1f1f 0%, #1a1212 100%);' +
+          'border:1px solid #ef4444;border-radius:8px;padding:14px 24px;' +
+          'text-align:center;z-index:25000;opacity:0;transition:opacity 0.3s;' +
+          'box-shadow:0 8px 32px rgba(239,68,68,0.3);' +
+          'font-family:\'Noto Serif SC\',serif;max-width:80vw;';
+        toast.innerHTML =
+          '<div style="font-size:14px;font-weight:600;color:#fca5a5;margin-bottom:4px;">⚠️ 存储空间不足</div>' +
+          '<div style="font-size:12px;color:#94a3b8;">部分进度可能无法保存，请清理浏览器缓存</div>';
+        document.body.appendChild(toast);
+        requestAnimationFrame(function() { toast.style.opacity = '1'; });
+        setTimeout(function() {
+          toast.style.opacity = '0';
+          setTimeout(function() { toast.remove(); }, 300);
+        }, 3000);
+      } catch (e) {
+        // 极端情况下 DOM 操作也可能失败，静默处理
       }
     },
 
