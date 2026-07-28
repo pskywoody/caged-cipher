@@ -41,6 +41,12 @@
       };
 
       // 提示冷却状态
+      this._baseHintCooldowns = {
+        manualCooldownMs: 30000,   // 手动提示冷却（基准值）
+        autoCooldownMs: 60000,     // 自动提示冷却（基准值）
+        crossCooldownMs: 45000,    // 交叉冷却（基准值）
+      };
+      this._hintCooldownMultiplier = 1.0;  // 当前冷却倍率（由三幕式等系统调整）
       this.hintCooldown = {
         lastHintTime: 0,       // 上次提示时间（手动+自动）
         lastAutoHintTime: 0,   // 上次自动提示时间
@@ -74,6 +80,8 @@
       // 重置提示冷却
       this.hintCooldown.lastHintTime = 0;
       this.hintCooldown.lastAutoHintTime = 0;
+      // 重置冷却倍率到基准（1.0），等待三幕式等系统重新设置
+      this.setHintCooldownMultiplier(1.0);
       this.techniqueEncounters = new Set();
       this.firstEncounterStuckTime = {};
 
@@ -179,6 +187,37 @@
       // 距离上次自动提示要超过自动冷却
       if (now - cd.lastAutoHintTime < cd.autoCooldownMs) return false;
       return true;
+    }
+
+    /**
+     * 设置提示冷却倍率（由三幕式等外部系统调用）
+     * multiplier > 1 → 冷却变长 → 提示更少
+     * multiplier < 1 → 冷却变短 → 提示更频繁
+     * @param {number} multiplier - 冷却倍率
+     */
+    setHintCooldownMultiplier(multiplier) {
+      if (typeof multiplier !== 'number' || multiplier <= 0) return;
+
+      this._hintCooldownMultiplier = multiplier;
+
+      const base = this._baseHintCooldowns;
+      this.hintCooldown.manualCooldownMs = Math.round(base.manualCooldownMs * multiplier);
+      this.hintCooldown.autoCooldownMs = Math.round(base.autoCooldownMs * multiplier);
+      this.hintCooldown.crossCooldownMs = Math.round(base.crossCooldownMs * multiplier);
+
+      if (typeof log !== 'undefined') {
+        log.info('[PlayerState] 提示冷却倍率调整: x' + multiplier.toFixed(2) +
+          ' auto=' + this.hintCooldown.autoCooldownMs + 'ms' +
+          ' cross=' + this.hintCooldown.crossCooldownMs + 'ms');
+      }
+    }
+
+    /**
+     * 获取当前提示冷却倍率
+     * @returns {number}
+     */
+    getHintCooldownMultiplier() {
+      return this._hintCooldownMultiplier;
     }
 
     /**

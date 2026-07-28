@@ -27,6 +27,7 @@
         totalWrong: 0,
         lastActionTime: 0,
         hintUsageCount: 0,
+        actComboMultiplier: 1.0,  // 幕次连击加成倍率（三幕式系统写入）
       },
       // === 关卡状态（三幕式/游戏循环写入）===
       level: {
@@ -41,6 +42,15 @@
         levelId: null,
         chapterId: null,
         isBossBattle: false,
+        // 幕次参数（三幕式系统写入，供各系统读取）
+        actParams: {
+          aiSpeedMultiplier: 1.0,
+          hintCooldownMultiplier: 1.0,
+          timePressureMultiplier: 0.5,
+          comboMultiplier: 1.0,
+          label: '',
+          description: '',
+        },
       },
       // === 决策状态（决策层读写）===
       decision: {

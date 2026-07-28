@@ -51,6 +51,9 @@
       this.comboWindowMs = config.comboWindowMs || 10000;     // 10 秒连击窗口
       this.insightStuckMs = config.insightStuckMs || 30000;   // 30 秒灵感型阈值
 
+      // 幕次加成倍率（由三幕式系统设置，默认1.0）
+      this._actMultiplier = 1.0;
+
       // 状态
       this.count = 0;                     // 当前连击数
       this._lastCorrectTime = 0;          // 上次正确填数时间
@@ -129,6 +132,50 @@
     setNewPlayer(isNew) {
       this.isNewPlayer = isNew;
       this._initMilestones();
+    }
+
+    /**
+     * 设置幕次连击加成倍率（由三幕式系统调用）
+     * 第一幕：1.2（快速进入心流）
+     * 第二幕：1.0（正常）
+     * 第三幕：1.5（高潮释放）
+     * @param {number} multiplier - 幕次倍率
+     */
+    setActMultiplier(multiplier) {
+      if (typeof multiplier !== 'number' || multiplier <= 0) return;
+      const oldMult = this._actMultiplier;
+      this._actMultiplier = multiplier;
+
+      if (typeof log !== 'undefined') {
+        log.info('[ComboSystem] 幕次连击倍率调整: ' + oldMult.toFixed(2) + ' → ' + multiplier.toFixed(2));
+      }
+
+      // 同步到 GameContext
+      this._syncToGameContext();
+    }
+
+    /**
+     * 获取当前幕次加成倍率
+     * @returns {number}
+     */
+    getActMultiplier() {
+      return this._actMultiplier;
+    }
+
+    /**
+     * 获取当前总得分倍率（连击倍率 × 幕次倍率）
+     * 供外部计分系统使用
+     * @returns {number}
+     */
+    getScoreMultiplier() {
+      // 基础连击倍率：根据连击数递增
+      let comboMult = 1.0;
+      if (this.count >= 10) comboMult = 2.0;
+      else if (this.count >= 8) comboMult = 1.8;
+      else if (this.count >= 5) comboMult = 1.5;
+      else if (this.count >= 3) comboMult = 1.2;
+
+      return comboMult * this._actMultiplier;
     }
 
     // === 事件方法 ===
@@ -271,6 +318,7 @@
       this._isEurekaReady = false;
       this._stuckStartTime = 0;
       this._currentFlowState = 'cold';
+      // 注意：不重置 _actMultiplier，由三幕式系统管理生命周期
       this._hideComboUI();
       this._hideFlowGlow();
 
@@ -874,6 +922,8 @@
         ctx.player.combo = this.count;
         // flow 状态在 _setFlowState 中实时更新，这里也做一次同步确保一致
         ctx.player.flow = this._currentFlowState;
+        // 幕次连击倍率
+        ctx.player.actComboMultiplier = this._actMultiplier;
       } catch (e) {
         // 静默失败，避免影响连击系统本身
       }

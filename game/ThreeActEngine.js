@@ -28,6 +28,40 @@
     ACT3: 'act3',       // 第三幕·雪崩
   };
 
+  // 幕次参数配置：影响游戏节奏的核心参数
+  // 第一幕：速填（轻松入场，熟悉盘面）
+  // 第二幕：博弈（正面博弈，节奏加快）
+  // 第三幕：雪崩（节奏拉满，最后冲刺）
+  const ACT_PARAMS = {
+    1: {
+      aiSpeedMultiplier: 0.7,      // AI 慢（给玩家熟悉时间）
+      hintCooldownMultiplier: 0.8,  // 提示冷却短（鼓励探索）
+      timePressureMultiplier: 0.0,  // 无时间压力
+      comboMultiplier: 1.2,         // 连击加成高（快速进入心流）
+      label: '序章',
+      description: '轻松入场，熟悉盘面',
+    },
+    2: {
+      aiSpeedMultiplier: 1.0,      // AI 正常速度
+      hintCooldownMultiplier: 1.0,  // 提示冷却正常
+      timePressureMultiplier: 0.5,  // 轻度时间压力
+      comboMultiplier: 1.0,         // 正常连击
+      label: '破局',
+      description: '正面博弈，节奏加快',
+    },
+    3: {
+      aiSpeedMultiplier: 1.4,      // AI 加速（紧迫感）
+      hintCooldownMultiplier: 1.5,  // 提示冷却加长（逼玩家自己想）
+      timePressureMultiplier: 1.0,  // 强时间压力
+      comboMultiplier: 1.5,         // 高连击奖励（高潮释放）
+      label: '雪崩',
+      description: '节奏拉满，最后冲刺',
+    },
+  };
+
+  // 默认幕次参数（非三幕关卡使用第二幕作为基准）
+  const DEFAULT_ACT_PARAMS = ACT_PARAMS[2];
+
   // 默认台词（如果关卡没有配置 threeActDialog）
   const DEFAULT_DIALOG = {
     act1Intro: [
@@ -72,6 +106,7 @@
 
       // 运行时状态
       this._enabled = false;
+      this._currentAct = 0;       // 当前幕次（0=未开始，1/2/3）
       this._act1Started = false;
       this._act2Triggered = false;
       this._act3Triggered = false;
@@ -80,9 +115,11 @@
       this._highlightTimer = null;
       this._firstCellClickListener = null;
       this._bgmManaged = false;  // BGM 是否已由三幕式接管（避免重复干预）
+      this._actTitleEl = null;   // 幕次切换全屏标题元素
 
       // 常量
       this.ACTS = ACTS;
+      this.ACT_PARAMS = ACT_PARAMS;
     }
 
     // ============================================================
@@ -125,6 +162,218 @@
       if (!this._bgmManaged) return;
       this._setBgmIntensity('Normal', 2000);
       this._bgmManaged = false;
+    }
+
+    // ============================================================
+    // 幕次参数系统
+    // ============================================================
+
+    /**
+     * 获取当前幕次参数
+     * 非三幕关卡返回默认参数（第二幕基准）
+     * @returns {Object} 幕次参数对象
+     */
+    getActParams() {
+      if (!this._enabled || this._currentAct < 1) {
+        return { ...DEFAULT_ACT_PARAMS };
+      }
+      return { ...(ACT_PARAMS[this._currentAct] || DEFAULT_ACT_PARAMS) };
+    }
+
+    /**
+     * 获取当前幕次（1/2/3），未启用或未开始返回 0
+     * @returns {number}
+     */
+    getCurrentAct() {
+      if (!this._enabled) return 0;
+      return this._currentAct;
+    }
+
+    /**
+     * 应用幕次参数到各系统
+     * 在幕次切换时调用，平滑过渡参数
+     * @param {number} actNum - 幕次（1/2/3）
+     */
+    _applyActParams(actNum) {
+      const params = ACT_PARAMS[actNum];
+      if (!params) return;
+
+      this._currentAct = actNum;
+
+      // 同步到 GameContext
+      this._syncActToGameContext(actNum);
+
+      if (typeof log !== 'undefined') {
+        log.info('[ThreeActGuide] 幕次参数切换: act=' + actNum +
+          ' label=' + params.label +
+          ' aiSpeed=' + params.aiSpeedMultiplier +
+          ' hintCd=' + params.hintCooldownMultiplier +
+          ' combo=' + params.comboMultiplier);
+      }
+
+      // === 1. AI 速度调整（仅 Boss 战生效）===
+      try {
+        if (typeof AISpeedController !== 'undefined' && AISpeedController.setMultiplier) {
+          // 注意：aiSpeedMultiplier 的语义与 AISpeedController 一致
+          // <1 = 变慢（delay 变大），>1 = 变快（delay 变小）
+          // GuideBattle 中 ctxMul 直接乘到 delay 上
+          // 所以 ACT_PARAMS 中 0.7 表示 AI 变慢（delay * 0.7 其实是变快...）
+          // 等一下，需要确认语义：
+          // GuideBattle: delay = baseDelay * ... * ctxMul
+          // ctxMul < 1 → delay 变小 → AI 变快
+          // ctxMul > 1 → delay 变大 → AI 变慢
+          //
+          // ACT_PARAMS.aiSpeedMultiplier 语义：
+          // 0.7 = AI 慢（给玩家熟悉时间）→ delay 应该变大 → ctxMul = 1/0.7 ≈ 1.43
+          // 1.0 = 正常 → ctxMul = 1.0
+          // 1.4 = AI 快（紧迫感）→ delay 应该变小 → ctxMul = 1/1.4 ≈ 0.71
+          //
+          // 所以转换因子是 1 / aiSpeedMultiplier
+          const speedFactor = 1 / params.aiSpeedMultiplier;
+          AISpeedController.setMultiplier(speedFactor, 'three_act', 0, {
+            log: typeof log !== 'undefined' ? log : undefined,
+          });
+        }
+      } catch (e) {
+        console.warn('[ThreeActGuide] AI 速度调整失败:', e);
+      }
+
+      // === 2. 提示冷却调整 ===
+      try {
+        if (typeof ExpertSystem !== 'undefined' && ExpertSystem.perception) {
+          if (typeof ExpertSystem.perception.setHintCooldownMultiplier === 'function') {
+            ExpertSystem.perception.setHintCooldownMultiplier(params.hintCooldownMultiplier);
+          }
+        }
+      } catch (e) {
+        console.warn('[ThreeActGuide] 提示冷却调整失败:', e);
+      }
+
+      // === 3. 连击加成调整 ===
+      try {
+        const comboSys = typeof guideComboSystem !== 'undefined'
+          ? guideComboSystem
+          : (typeof window !== 'undefined' && window.guideComboSystem);
+        if (comboSys && typeof comboSys.setActMultiplier === 'function') {
+          comboSys.setActMultiplier(params.comboMultiplier);
+        }
+      } catch (e) {
+        console.warn('[ThreeActGuide] 连击加成调整失败:', e);
+      }
+
+      // === 4. 触发全局事件（供其他系统监听）===
+      try {
+        if (typeof EventBus !== 'undefined' && EventBus.publish) {
+          EventBus.publish('three-act:act-changed', {
+            act: actNum,
+            params: { ...params },
+          });
+        }
+      } catch (e) {
+        // 静默失败，EventBus 可能不存在
+      }
+
+      // === 5. 视觉：幕次切换全屏标题动画 ===
+      this._showActTitle(actNum, params);
+    }
+
+    /**
+     * 显示幕次切换全屏标题动画
+     * @param {number} actNum - 幕次
+     * @param {Object} params - 幕次参数
+     */
+    _showActTitle(actNum, params) {
+      try {
+        // 移除之前的标题元素
+        if (this._actTitleEl && this._actTitleEl.parentNode) {
+          this._actTitleEl.parentNode.removeChild(this._actTitleEl);
+        }
+
+        const el = document.createElement('div');
+        el.className = 'three-act-title-overlay';
+        el.style.cssText = `
+          position: fixed;
+          top: 0; left: 0;
+          width: 100%; height: 100%;
+          z-index: 20000;
+          pointer-events: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          opacity: 0;
+          transition: opacity 0.5s ease;
+        `;
+
+        // 根据幕次选择颜色
+        const actColors = {
+          1: { main: '#22c55e', glow: 'rgba(34, 197, 94, 0.6)' },   // 绿色·序章
+          2: { main: '#f59e0b', glow: 'rgba(245, 158, 11, 0.6)' },   // 琥珀·破局
+          3: { main: '#ef4444', glow: 'rgba(239, 68, 68, 0.7)' },    // 红色·雪崩
+        };
+        const color = actColors[actNum] || actColors[2];
+
+        el.innerHTML = `
+          <div class="act-title-content" style="text-align: center; transform: scale(0.9); transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);">
+            <div class="act-title-label" style="
+              font-size: 20px;
+              font-weight: 500;
+              color: ${color.main};
+              letter-spacing: 8px;
+              margin-bottom: 12px;
+              opacity: 0.9;
+              text-transform: uppercase;
+            ">第 ${actNum} 幕</div>
+            <div class="act-title-name" style="
+              font-size: 64px;
+              font-weight: 900;
+              color: #fff;
+              letter-spacing: 16px;
+              text-shadow: 0 0 30px ${color.glow}, 0 0 60px ${color.glow}, 0 4px 16px rgba(0,0,0,0.5);
+              font-family: 'Impact', 'Arial Black', 'Microsoft YaHei', sans-serif;
+              line-height: 1;
+            ">${params.label}</div>
+            <div class="act-title-desc" style="
+              font-size: 16px;
+              color: rgba(255,255,255,0.7);
+              margin-top: 16px;
+              letter-spacing: 4px;
+            ">${params.description}</div>
+            <div class="act-title-divider" style="
+              width: 120px;
+              height: 2px;
+              background: linear-gradient(90deg, transparent, ${color.main}, transparent);
+              margin: 20px auto 0;
+            "></div>
+          </div>
+        `;
+
+        document.body.appendChild(el);
+        this._actTitleEl = el;
+
+        // 淡入 + 缩放
+        requestAnimationFrame(() => {
+          el.style.opacity = '1';
+          const content = el.querySelector('.act-title-content');
+          if (content) content.style.transform = 'scale(1)';
+        });
+
+        // 2 秒后淡出
+        setTimeout(() => {
+          if (this._actTitleEl === el) {
+            el.style.opacity = '0';
+            const content = el.querySelector('.act-title-content');
+            if (content) content.style.transform = 'scale(1.1)';
+            setTimeout(() => {
+              if (this._actTitleEl === el && el.parentNode) {
+                el.parentNode.removeChild(el);
+                this._actTitleEl = null;
+              }
+            }, 500);
+          }
+        }, 2000);
+      } catch (e) {
+        console.warn('[ThreeActGuide] 幕次标题动画失败:', e);
+      }
     }
 
     // ============================================================
@@ -310,6 +559,7 @@
 
         // 初始化启用状态
         this._enabled = this.isEnabled(this._levelData);
+        this._currentAct = 0;
         if (typeof UIManager !== 'undefined') {
           UIManager.setThreeActEnabled(this._enabled);
         }
@@ -368,8 +618,8 @@
         if (!this._storyEngine || !this._renderer) { resolve(); return; }
         if (!this._levelData) { resolve(); return; }
 
-        // === GameContext 同步：进入第一幕 + 统计各幕格子总数 ===
-        this._syncActToGameContext(1);
+        // === 进入第一幕：应用幕次参数 + 统计各幕格子总数 ===
+        this._applyActParams(1);
 
         const levelId = this._levelData.levelId;
         if (this._hasShown(levelId, ACTS.ACT1)) { resolve(); return; }
@@ -436,8 +686,8 @@
 
       this._act2Triggered = true;
 
-      // === GameContext 同步：进入第二幕 ===
-      this._syncActToGameContext(2);
+      // === 进入第二幕：应用幕次参数 ===
+      this._applyActParams(2);
 
       // 第二幕 BGM：Intense 强度（紧张博弈）—— 无论是否已显示对话都设置
       this._setBgmIntensity('Intense', 1500);
@@ -514,8 +764,8 @@
 
       this._act3Triggered = true;
 
-      // === GameContext 同步：进入第三幕 ===
-      this._syncActToGameContext(3);
+      // === 进入第三幕：应用幕次参数 ===
+      this._applyActParams(3);
 
       // 第三幕 BGM：保持 Intense 强度（雪崩阶段已足够紧张）—— 无论是否已显示都设置
       this._setBgmIntensity('Intense', 1500);
@@ -615,6 +865,14 @@
 
         ctx.level.act = actNum;
 
+        // 同步幕次参数到 GameContext，供各系统读取
+        const params = this.getActParams();
+        if (ctx.level.actParams) {
+          Object.assign(ctx.level.actParams, params);
+        } else {
+          ctx.level.actParams = { ...params };
+        }
+
         // 如果可以获取到详细进度，也同步过去
         if (typeof WinConditionManager !== 'undefined' && this._board && this._levelData) {
           try {
@@ -708,6 +966,7 @@
       // 此函数保留用于向后兼容，实际引导在 startLevel 的钩子中触发
       if (!this._levelData) return;
       this._enabled = this.isEnabled(this._levelData);
+      this._currentAct = 0;
       if (typeof UIManager !== 'undefined') {
         UIManager.setThreeActEnabled(this._enabled);
       }
@@ -776,7 +1035,48 @@
       // 重置 BGM 强度
       this.resetBgm();
 
+      // 重置 AI 速度倍率
+      try {
+        if (typeof AISpeedController !== 'undefined' && AISpeedController.resetMultiplier) {
+          AISpeedController.resetMultiplier('three_act', {
+            log: typeof log !== 'undefined' ? log : undefined,
+          });
+        }
+      } catch (e) {
+        console.warn('[ThreeActGuide] cleanup: AI speed reset failed:', e);
+      }
+
+      // 重置提示冷却倍率
+      try {
+        if (typeof ExpertSystem !== 'undefined' && ExpertSystem.perception) {
+          if (typeof ExpertSystem.perception.setHintCooldownMultiplier === 'function') {
+            ExpertSystem.perception.setHintCooldownMultiplier(1.0);
+          }
+        }
+      } catch (e) {
+        console.warn('[ThreeActGuide] cleanup: hint cooldown reset failed:', e);
+      }
+
+      // 重置连击加成倍率
+      try {
+        const comboSys = typeof guideComboSystem !== 'undefined'
+          ? guideComboSystem
+          : (typeof window !== 'undefined' && window.guideComboSystem);
+        if (comboSys && typeof comboSys.setActMultiplier === 'function') {
+          comboSys.setActMultiplier(1.0);
+        }
+      } catch (e) {
+        console.warn('[ThreeActGuide] cleanup: combo multiplier reset failed:', e);
+      }
+
+      // 清除幕次标题元素
+      if (this._actTitleEl && this._actTitleEl.parentNode) {
+        this._actTitleEl.parentNode.removeChild(this._actTitleEl);
+      }
+      this._actTitleEl = null;
+
       this._enabled = false;
+      this._currentAct = 0;
       if (typeof UIManager !== 'undefined') {
         UIManager.setThreeActEnabled(false);
       }
