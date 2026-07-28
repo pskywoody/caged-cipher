@@ -9,6 +9,12 @@
   const UIManager = window.UIManager;
   const CharBubble = window.CharBubble;
   const InputRouter = window.InputRouter;
+  const WhatIfManager = window.WhatIfManager;
+  const GameController = window.GameController;
+
+  // === 第四阶段抽离：GameController 和 WhatIfManager 实例 ===
+  let gameController = null;
+  let whatIfManager = null;
 
   /* ============================================================
      Z-INDEX 层级宪章（与 guide.html :root CSS 变量保持一致）
@@ -302,72 +308,9 @@
 
   // === Level Loading ===
   async function loadLevel(levelId) {
-    try {
-      const data = await LevelLoader.getChapterData();
 
-      // 支持延迟加载模式：加载所有章节到 chapters 数组，保持向后兼容
-      if (data._lazy && typeof data.getAllChapters === 'function') {
-        const allChapters = await data.getAllChapters();
-        data.chapters = allChapters; // 填充到 chapters 字段，兼容旧代码
-      }
+    return gameController.loadLevel(levelId);
 
-      global.CHAPTER_DATA = data;
-
-      // Find level in chapter data
-      let foundLevel = null;
-      let foundChapter = null;
-      for (const ch of data.chapters) {
-        for (const lvl of ch.levels) {
-          if (lvl.levelId === levelId) {
-            foundLevel = lvl;
-            foundChapter = ch;
-            break;
-          }
-        }
-        if (foundLevel) break;
-      }
-
-      if (!foundLevel) {
-        log.warn('Level not found in chapter data:', levelId);
-        return;
-      }
-
-      currentChapterData = foundChapter;
-
-      // 尝试加载 v2 优化关卡数据并合并
-      if (LevelLoader.USE_OPTIMIZED_LEVELS) {
-        try {
-          const v2Map = await LevelLoader.loadV2Levels();
-          if (v2Map && v2Map.has(parseInt(levelId))) {
-            const v2Level = v2Map.get(parseInt(levelId));
-            currentLevelData = LevelLoader.mergeV2Level(foundLevel, v2Level);
-            log.info('[V2Levels] 使用优化版关卡数据:', levelId);
-            if (currentLevelData.threeAct) {
-              log.info('[ThreeAct] 使用原生三幕数据: opening=' +
-                currentLevelData.threeAct.opening.length +
-                ', breakthrough=' + currentLevelData.threeAct.breakthrough.length +
-                ', avalanche=' + currentLevelData.threeAct.avalanche.length);
-            } else {
-              log.info('[ThreeAct] 无原生三幕数据，将使用分类器兜底');
-            }
-            return;
-          }
-        } catch (v2Err) {
-          log.warn('[V2Levels] 加载 v2 数据失败，使用原始关卡数据:', v2Err);
-        }
-      }
-
-      // 回退：使用章节中的原始数据
-      currentLevelData = foundLevel;
-      if (currentLevelData && currentLevelData.threeAct) {
-        log.info('[ThreeAct] 使用章节三幕数据: opening=' +
-          currentLevelData.threeAct.opening.length +
-          ', breakthrough=' + currentLevelData.threeAct.breakthrough.length +
-          ', avalanche=' + currentLevelData.threeAct.avalanche.length);
-      }
-    } catch(e) {
-      log.error('Failed to load level:', e);
-    }
   }
 
   /**
@@ -919,118 +862,11 @@
   }
 
   async function startLevel(levelId) {
-    // ===== 关卡切换：清理所有运行时状态和定时器 =====
-    _cleanupLevelState();
 
-    currentLevelId = levelId;
-    isCompleted = false;
-    errorCount = 0;
-    hintCount = 0;
-    usedNotes = false;
 
-    // Load level data
-    await loadLevel(levelId);
+    return gameController.startLevel(levelId);
 
-    // Find chapter data
-    findChapter();
 
-    // 剧情播放期间暂停计时器
-    if (gameTimer) gameTimer.pauseForDialog();
-
-    // Play prologue (first level of chapter only)
-    if (isFirstLevelOfChapter()) {
-      await playPrologue();
-    }
-
-    // Play pre-dialog (level-specific teaching dialogue)
-    await playPreDialog();
-
-    // 三幕式引导·钩子1：第一幕引子（棋盘前的纯对话）
-    if (typeof ThreeActGuide !== 'undefined') {
-      try { await ThreeActGuide.playAct1Intro(); } catch(e) {}
-    }
-
-    // 剧情结束，恢复计时器
-    if (gameTimer) gameTimer.resumeFromDialog();
-
-    // 切换BGM：序章用intro，正式关卡用对应章节BGM，Boss关用boss战音乐
-    const chapterId = currentChapterData ? currentChapterData.chapterId : 1;
-    if (isLastLevelOfChapter()) {
-      // 每章最后一关是Boss战，播放Boss战音乐
-      AudioService.bgm.playFile('boss_battle.mp3');
-    } else {
-      // 普通关卡播放章节BGM（如 chapter_1.mp3）
-      AudioService.bgm.play(chapterId);
-    }
-
-    // Init board
-    initBoard();
-
-    // ===== GameContext: 重置为新关卡状态 =====
-    if (global.GameContext) {
-      const chapterId = currentChapterData ? currentChapterData.chapterId : null;
-      const isBoss = isLastLevelOfChapter();
-      global.GameContext.resetForNewLevel({
-        levelId: levelId,
-        chapterId: chapterId,
-        isBossBattle: isBoss,
-      });
-    }
-
-    // 三幕式引导·钩子2：第一幕揭盘（棋盘渲染后，高亮 + 对话）
-    if (typeof ThreeActGuide !== 'undefined') {
-      try { await ThreeActGuide.playAct1BoardReveal(); } catch(e) {}
-    }
-
-    // 异步预加载关卡关键音效（不阻塞主流程）
-    try {
-      if (typeof AudioService !== 'undefined' && AudioService.sfx && AudioService.sfx.preloadLevelSfx) {
-        AudioService.sfx.preloadLevelSfx(currentLevelId, currentLevelData);
-      }
-    } catch(e) {
-      log.debug('preloadLevelSfx failed:', e);
-    }
-
-    // 启动Boss战（如果是章节最后一关）
-    if (typeof GuideBattle !== 'undefined' && isLastLevelOfChapter()) {
-      startBossBattle();
-    }
-
-    // Setup next level button
-    setupNextLevel();
-
-    // 兜底：确保交互是解锁状态
-    setInteractionLocked(false);
-    // 确保棋盘 pointer-events 正常
-    const canvas = document.getElementById('gameCanvas');
-    if (canvas) canvas.style.pointerEvents = '';
-    // 确保数字键和工具栏可点击
-    document.querySelectorAll('.num-btn, #toolbar button').forEach(el => {
-      el.style.pointerEvents = '';
-    });
-    // 确保技术矩阵是关闭的
-    if (techMatrix && typeof techMatrix.hide === 'function') {
-      techMatrix.hide();
-    }
-
-    // Start level
-    if (gameTimer) {
-      gameTimer.start();
-    } else {
-      startTime = Date.now();
-    }
-    hintCount = 0;
-    expertSystem.onLevelStart();
-
-    // 保存上次游玩关卡
-    if (global.ProgressManager && typeof ProgressManager.setLastPlayedLevel === 'function') {
-      ProgressManager.setLastPlayedLevel(currentLevelId);
-    }
-
-    // 启动教学引导（如果有 lessonPlan）
-    _startLessonPlayer();
-
-    log.info('Level started:', currentLevelId);
   }
 
   // === Chapter Select Setup ===
@@ -1090,6 +926,99 @@
 
     // 初始化游戏计时器
     initGameTimer();
+
+    // 初始化游戏流程控制器（第四阶段抽离）
+    _initGameController();
+  }
+
+  // === GameController 初始化（第四阶段抽离） ===
+  function _initGameController() {
+    gameController = new GameController({
+      // 系统对象
+      LevelLoader: LevelLoader,
+      AudioService: AudioService,
+      ProgressManager: global.ProgressManager,
+      BoardClass: global.Board,
+      RendererClass: global.Renderer,
+      HintSystemClass: global.HintSystem,
+      TeachingSystemClass: global.TeachingSystem,
+      NoteSystemClass: global.NoteSystem,
+      TechMatrixClass: global.TechMatrix,
+      TechRaterClass: global.TechRater,
+      ComboSystemClass: global.ComboSystem,
+      ComedySystemClass: global.ComedySystem,
+      GameTimerClass: global.GameTimer,
+      ChapterSelectClass: global.ChapterSelect,
+      AchievementPanelClass: global.AchievementPanel,
+      GalleryPanelClass: global.GalleryPanel,
+      SealAnimationInstance: global.SealAnimationInstance,
+      WinConditionManager: global.WinConditionManager,
+      ThreeActGuide: global.ThreeActGuide,
+      GuideBattle: global.GuideBattle,
+      Rule45Class: global.Rule45,
+      GameContext: global.GameContext,
+
+      // 引用对象
+      board: board,
+      renderer: renderer,
+      expertSystem: expertSystem,
+      comboSystem: comboSystem,
+      comedySystem: comedySystem,
+      storyEngine: storyEngine,
+      hintSystem: hintSystem,
+      gameTimer: gameTimer,
+      chapterSelect: chapterSelect,
+      achievementPanel: achievementPanel,
+      settingsPanel: settingsPanel,
+      galleryPanel: galleryPanel,
+      techMatrix: techMatrix,
+      lessonPlayer: lessonPlayer,
+      whatIfManager: null, // 稍后设置
+
+      // 回调
+      onShowToast: showToast,
+      onVibrate: (presetName) => {
+        if (presetName === 'ERROR') vibrate(VIBRATE_PRESETS.ERROR);
+        else if (VIBRATE_PRESETS[presetName]) vibrate(VIBRATE_PRESETS[presetName]);
+      },
+      onSetUIVisible: setUIVisible,
+      onSetInteractionLocked: setInteractionLocked,
+      onUpdateRule45Banner: updateRule45Banner,
+      onResetRule45Banner: () => UIManager.resetRule45Banner(),
+      onUpdateNumBtnCompletedState: updateNumBtnCompletedState,
+      onUpdateNoteButtonState: updateNoteButtonState,
+      onHidePauseMenu: hidePauseMenu,
+      onNavigateTo: navigateTo,
+      onCleanupLevelState: _cleanupLevelState,
+      onStartLessonPlayer: _startLessonPlayer,
+      onIsFirstLevelOfChapter: isFirstLevelOfChapter,
+      onIsLastLevelOfChapter: isLastLevelOfChapter,
+      onIsLastChapterOfGame: isLastChapterOfGame,
+      onFindChapter: findChapter,
+      onFindChapterById: findChapterById,
+      onInitRule45Banner: initRule45Banner,
+      onPlayClimaxAnimation: playClimaxAnimation,
+      onPlayClearDialog: playClearDialog,
+      onPlayChapterEpilogue: playChapterEpilogue,
+      onShowChapterTransition: showChapterTransition,
+      onShowGameEnding: showGameEnding,
+      onPlayPrologue: playPrologue,
+      onPlayPreDialog: playPreDialog,
+      onStartBossBattle: startBossBattle,
+      onShowSealUnlockAnimation: showSealUnlockAnimation,
+      onComboMilestone: (level, milestone) => {
+        if (milestone.vibrate && VIBRATE_PRESETS[milestone.vibrate]) {
+          vibrate(VIBRATE_PRESETS[milestone.vibrate]);
+        }
+        if (typeof comboUI !== 'undefined' && comboUI.showMilestone) {
+          comboUI.showMilestone(level, milestone);
+        }
+      },
+      onUpdateFloatBarTabIcon: _updateFloatBarTabIcon,
+
+      // 日志
+      log: log,
+    });
   }
 
   // === 游戏计时器初始化 ===
@@ -2301,558 +2230,16 @@
   }
 
   // === Board Init ===
-  function initBoard() {
-    if (!currentLevelData) return;
-
-    board = new Board(currentLevelData.gridSize || 9);
-    board.loadLevel({
-      cells: currentLevelData.boardData,
-      cages: currentLevelData.cages || [],
-      levelId: currentLevelId,
-      // Boss战机制数据（普通关卡没有这些字段，loadLevel 会自动设为 null）
-      lockCells: currentLevelData.lockCells,
-      fakeCells: currentLevelData.fakeCells,
-      regionLocks: currentLevelData.regionLocks,
-      cageCollapse: currentLevelData.cageCollapse,
-      dualPath: currentLevelData.dualPath,
-      phases: currentLevelData.phases,
-    });
-
-    renderer = new Renderer('gameCanvas');
-    // Set theme for chapter
-    const chapterId = currentChapterData ? currentChapterData.chapterId : 1;
-    renderer.setTheme(chapterId);
-    // 设置关卡专属背景（每关一张独立背景图）
-    if (typeof renderer.setLevelBackground === 'function') {
-      renderer.setLevelBackground(currentLevelId);
-    }
-    renderer.recalcCellSize(board);
-    renderer.render(board);
-
-    // Initialize Note System (candidate display)
-    if (typeof NoteSystem !== 'undefined') {
-      const noteSys = new NoteSystem(board, renderer, {
-        perspective: 'hero', // hero/yan/ying - default hero mode
-        mode: 'classic',     // 经典模式：笔记模式下全显
-        maxGlimpseCount: 3,
-        glimpseDuration: 3000,
-      });
-      window.gameNoteSystem = noteSys;
-      renderer.setNoteSystem(noteSys);
-      global.guideNoteSystem = noteSys;
-    }
-
-    // Initialize hint system
-    // Initialize teaching system (role-guided learning)
-    let teachingSys = null;
-    if (typeof TeachingSystem !== 'undefined') {
-      teachingSys = new TeachingSystem();
-      teachingSys.load();
-      global.guideTeachingSystem = teachingSys;
-    }
-
-    // Initialize hint system with teaching integration
-    hintSystem = new HintSystem(board, currentLevelData.solution, {
-      teachingSystem: teachingSys
-    });
-
-    // Initialize Rule45 banner (顶部常驻 HUD，仅 9x9 显示，201关起解锁)
-    const banner = document.getElementById('rule45-banner');
-    const pcNotebook = document.getElementById('pc-rule45-notebook');
-    const levelIdNum = parseInt(currentLevelId);
-    const rule45Unlocked = levelIdNum >= 201;
-    if (typeof Rule45 !== 'undefined' && board.cages.length > 0 && board.size === 9 && rule45Unlocked) {
-      if (banner) banner.style.display = 'block';
-      if (pcNotebook) pcNotebook.style.display = '';
-      initRule45Banner();
-      updateRule45Banner(null);
-    } else {
-      if (banner) banner.style.display = 'none';
-      if (pcNotebook) pcNotebook.style.display = 'none';
-      UIManager.resetRule45Banner();
-    }
-
-    // Initialize TechMatrix (技术矩阵)
-    if (typeof TechMatrix !== 'undefined') {
-      if (techMatrix) {
-        // 更新现有实例
-        techMatrix.setBoard(board);
-        techMatrix.setRenderer(renderer);
-      } else {
-        techMatrix = new TechMatrix({
-          board: board,
-          techRater: typeof TechRater !== 'undefined' ? TechRater : null,
-          renderer: renderer,
-          onClose: () => {
-            // 关闭时清理高亮
-          },
-        });
-        global.guideTechMatrix = techMatrix;
-      }
-    }
-
-    global.guideBoard = board;
-    global.guideRenderer = renderer;
-
-    // Configure expert system with board (enables replay system and dynamic thresholds)
-    if (expertSystem && typeof expertSystem.init === 'function') {
-      let levelsCompleted = 0;
-      if (global.ProgressManager && ProgressManager._data && ProgressManager._data.levelScores) {
-        levelsCompleted = Object.keys(ProgressManager._data.levelScores).length;
-      }
-      expertSystem.init({
-        board: board,
-        dynamicThresholds: true,
-        levelsCompleted: levelsCompleted,
-        onFeedback: (msg, level) => showToast(msg),
-      });
-      // 设置盘面尺寸，动态调整心流/EUREKA 阈值
-      const gridSize = currentLevelData.gridSize || 9;
-      if (typeof expertSystem.setGridSize === 'function') {
-        expertSystem.setGridSize(gridSize);
-      }
-    }
-
-    // Initialize Combo System (连击系统)
-    if (typeof ComboSystem !== 'undefined') {
-      const gridSize = currentLevelData.gridSize || 9;
-      const chapterId = currentChapterData ? currentChapterData.chapterId : 1;
-      const isNewPlayer = chapterId <= 1 && gridSize <= 4; // 第1章4x4为新手保护
-      comboSystem = new ComboSystem({
-        gridSize: gridSize,
-        isNewPlayer: isNewPlayer,
-        onComboChange: (count) => {
-          // 同步连击数到渲染器（燃烧效果）
-          if (renderer && typeof renderer.setComboCount === 'function') {
-            renderer.setComboCount(count);
-          }
-          // 吐槽系统：连击变化
-          if (comedySystem) {
-            comedySystem.onComboChange(count);
-          }
-        },
-        onMilestone: (level, milestone) => {
-          // 里程碑音效
-          if (milestone.sfx && typeof AudioService !== 'undefined') {
-            AudioService.sfx.play(milestone.sfx);
-          }
-          // 里程碑震动（递增强度）
-          if (milestone.key === 'combo_5') {
-            vibrate(VIBRATE_PRESETS.COMBO_5);
-          } else if (milestone.key === 'combo_10') {
-            vibrate(VIBRATE_PRESETS.COMBO_10);
-          } else if (milestone.key === 'combo_max') {
-            vibrate(VIBRATE_PRESETS.COMBO_MAX);
-          } else {
-            vibrate(VIBRATE_PRESETS.COMBO_MILESTONE);
-          }
-          // 5连击时显示角色鼓励气泡
-          if (milestone.key === 'combo_5' && expertSystem && expertSystem.expression) {
-            expertSystem.expression.enqueue({
-              action: 'SHOW_TOAST',
-              payload: { message: '手感火热！继续保持~' },
-              priority: 50,
-            });
-          }
-          // 10连击 MAX 祝贺
-          if (milestone.key === 'combo_max') {
-            showToast('MAX 连击！太强了！', 2000);
-          }
-        },
-        onEureka: (type) => {
-          // EUREKA 音效
-          if (typeof AudioService !== 'undefined') {
-            AudioService.sfx.play('eureka');
-          }
-          // EUREKA 震动
-          vibrate(VIBRATE_PRESETS.EUREKA);
-          const msg = type === 'insight'
-            ? '灵感迸发！想通了关键的一步！'
-            : 'EUREKA！连击爆发！';
-          showToast(msg, 2500);
-          // 角色反馈
-          if (expertSystem && expertSystem.expression) {
-            expertSystem.expression.enqueue({
-              action: 'EUREKA',
-              payload: { level: 3, message: msg },
-              priority: 80,
-            });
-          }
-          // 吐槽系统：EUREKA 触发
-          if (comedySystem) {
-            comedySystem.onEureka(type);
-          }
-        },
-        onFlowStateChange: (state, depth) => {
-          // 吐槽系统：心流状态变化
-          if (comedySystem) {
-            comedySystem.onFlowStateChange(state);
-          }
-        },
-      });
-      global.guideComboSystem = comboSystem;
-
-      // 启动连击系统的时间推进（检测超时断连 + 灵感型EUREKA）
-      if (comboSystem._updateInterval) clearInterval(comboSystem._updateInterval);
-      comboSystem._updateInterval = setInterval(() => {
-        if (comboSystem && !isCompleted) {
-          comboSystem.update(1000);
-        }
-      }, 1000);
-
-      // ===== 连击UI控制器 (Combo UI Controller) =====
-      (function initComboUI() {
-        // DOM 引用
-        const comboContainer = document.getElementById('combo-ui-container');
-        const comboNumber = document.getElementById('combo-ui-number');
-        const comboLabel = document.getElementById('combo-ui-label');
-        const gaugeContainer = document.getElementById('combo-gauge-container');
-        const gaugeFill = document.getElementById('combo-gauge-fill');
-        const flowIndicator = document.getElementById('flow-state-indicator');
-        const flowText = document.getElementById('flow-state-text');
-        const milestoneOverlay = document.getElementById('milestone-overlay');
-        const milestoneText = document.getElementById('milestone-text');
-        const milestoneSubtitle = document.getElementById('milestone-subtitle');
-        const milestoneObj = document.getElementById('milestone-objjection');
-        const breakOverlay = document.getElementById('combo-break-overlay');
-        const breakText = document.getElementById('combo-break-text');
-        const breakParticles = document.getElementById('combo-break-particles');
-        const bossPortraitWrap = document.getElementById('boss-portrait-wrap');
-
-        // 心流状态文字映射
-        const FLOW_STATE_LABELS = {
-          cold: '冷场',
-          stale: '预热',
-          flow: '心流',
-          eureka: 'EUREKA'
-        };
-
-        // 里程碑文字映射（逆转裁判风格）
-        const MILESTONE_OBJECTIONS = {
-          'combo_3': '连击！',
-          'combo_5': '手感火热！',
-          'combo_max': 'MAX 惊雷！',
-          'eureka': 'EUREKA！'
-        };
-
-        // 时间条动画状态
-        let gaugeAnimFrame = null;
-        let lastComboTime = 0;
-        let windowMs = comboSystem.comboWindowMs;
-
-        // 时间条动画循环
-        function updateGauge() {
-          if (!comboSystem || comboSystem.count <= 1) {
-            gaugeAnimFrame = null;
-            return;
-          }
-          const elapsed = Date.now() - lastComboTime;
-          const remaining = Math.max(0, windowMs - elapsed);
-          const percent = (remaining / windowMs) * 100;
-          gaugeFill.style.width = percent + '%';
-
-          // 低于 30% 时警告
-          if (percent < 30) {
-            gaugeFill.classList.add('warning');
-          } else {
-            gaugeFill.classList.remove('warning');
-          }
-
-          if (remaining > 0) {
-            gaugeAnimFrame = requestAnimationFrame(updateGauge);
-          } else {
-            gaugeAnimFrame = null;
-          }
-        }
-
-        function startGauge() {
-          lastComboTime = Date.now();
-          if (!gaugeAnimFrame) {
-            gaugeAnimFrame = requestAnimationFrame(updateGauge);
-          }
-        }
-
-        function stopGauge() {
-          if (gaugeAnimFrame) {
-            cancelAnimationFrame(gaugeAnimFrame);
-            gaugeAnimFrame = null;
-          }
-        }
-
-        // 根据连击数计算 tier 等级
-        function getTierClass(count) {
-          if (count >= comboSystem._maxLevel) return 'tier-4';
-          if (count >= comboSystem._eurekaLevel) return 'tier-3';
-          if (count >= 5) return 'tier-2';
-          return 'tier-1';
-        }
-
-        // 更新连击数显示
-        function updateComboDisplay(count) {
-          if (!comboContainer) return;
-
-          if (count <= 1) {
-            comboContainer.classList.remove('show');
-            return;
-          }
-
-          comboContainer.classList.add('show');
-          comboNumber.textContent = count;
-
-          // 更新 tier 颜色
-          comboNumber.classList.remove('tier-1', 'tier-2', 'tier-3', 'tier-4', 'tier-eureka');
-          comboNumber.classList.add(getTierClass(count));
-
-          // 弹跳动画（重启动画）
-          comboNumber.classList.remove('pop');
-          void comboNumber.offsetWidth;
-          comboNumber.classList.add('pop');
-
-          // 更新标签
-          comboLabel.textContent = 'COMBO';
-          comboLabel.style.color = comboNumber.style.color;
-        }
-
-        // 更新心流状态显示
-        function updateFlowState(state) {
-          if (!flowIndicator) return;
-          flowIndicator.classList.remove('state-cold', 'state-stale', 'state-flow', 'state-eureka');
-          flowIndicator.classList.add('state-' + state);
-          if (flowText) {
-            flowText.textContent = FLOW_STATE_LABELS[state] || state;
-          }
-        }
-
-        // 显示里程碑特效
-        function showMilestone(level, milestone) {
-          if (!milestoneOverlay) return;
-
-          const isEureka = milestone.key === 'eureka';
-
-          milestoneText.textContent = level;
-          milestoneSubtitle.textContent = milestone.label;
-          milestoneObj.textContent = MILESTONE_OBJECTIONS[milestone.key] || milestone.label;
-
-          // 重置动画
-          milestoneOverlay.classList.remove('show', 'eureka');
-          void milestoneOverlay.offsetWidth;
-
-          if (isEureka) {
-            milestoneOverlay.classList.add('eureka');
-          }
-          milestoneOverlay.classList.add('show');
-
-          // 更新连击数字为 EUREKA 样式
-          if (isEureka && comboNumber) {
-            comboNumber.classList.remove('tier-1', 'tier-2', 'tier-3', 'tier-4');
-            comboNumber.classList.add('tier-eureka');
-          }
-
-          // 自动隐藏
-          const duration = isEureka ? 1800 : 1000;
-          setTimeout(() => {
-            milestoneOverlay.classList.remove('show', 'eureka');
-          }, duration);
-        }
-
-        // 显示断连效果
-        function showBreak(reason, oldCount) {
-          if (!breakOverlay || oldCount < 3) return; // 低连击不断连特效
-
-          // 断连文字
-          const breakLabels = {
-            'wrong': '失误！',
-            'timeout': '超时！',
-            'erase': '擦除！'
-          };
-          breakText.textContent = breakLabels[reason] || '断连！';
-
-          // 生成破碎粒子
-          if (breakParticles) {
-            breakParticles.innerHTML = '';
-            const particleCount = Math.min(12, Math.floor(oldCount / 2) + 4);
-            for (let i = 0; i < particleCount; i++) {
-              const p = document.createElement('div');
-              p.className = 'break-particle';
-              const angle = (Math.PI * 2 * i) / particleCount + Math.random() * 0.5;
-              const dist = 60 + Math.random() * 80;
-              p.style.setProperty('--px', Math.cos(angle) * dist + 'px');
-              p.style.setProperty('--py', Math.sin(angle) * dist + 'px');
-              p.style.animationDelay = (Math.random() * 0.1) + 's';
-              breakParticles.appendChild(p);
-            }
-          }
-
-          // 时间条破碎动画
-          if (gaugeContainer) {
-            gaugeContainer.classList.add('break');
-            setTimeout(() => {
-              gaugeContainer.classList.remove('break');
-              gaugeFill.style.width = '0%';
-            }, 500);
-          }
-
-          // 重置并播放
-          breakOverlay.classList.remove('show');
-          void breakOverlay.offsetWidth;
-          breakOverlay.classList.add('show');
-
-          setTimeout(() => {
-            breakOverlay.classList.remove('show');
-          }, 800);
-
-          // 停止时间条动画
-          stopGauge();
-        }
-
-        // Boss战震慑效果
-        function triggerBossIntimidation(comboCount) {
-          if (!bossPortraitWrap) return;
-          // 只在 Boss 战激活时触发
-          if (typeof GuideBattle === 'undefined' || !GuideBattle.active) return;
-          // 达到一定连击数才触发
-          if (comboCount < 5) return;
-
-          bossPortraitWrap.classList.remove('shake');
-          void bossPortraitWrap.offsetWidth;
-          bossPortraitWrap.classList.add('shake');
-
-          setTimeout(() => {
-            bossPortraitWrap.classList.remove('shake');
-          }, 800);
-        }
-
-        // ===== 注册回调 =====
-
-        // 保存原始回调（链式调用）
-        const origOnComboChange = comboSystem.onComboChange;
-        comboSystem.onComboChange = function(count) {
-          // 调用原始回调
-          if (origOnComboChange) {
-            try { origOnComboChange(count); } catch(e) {}
-          }
-          // UI 更新
-          updateComboDisplay(count);
-          if (count > 1) {
-            startGauge();
-            // Boss 震慑
-            triggerBossIntimidation(count);
-          }
-        };
-
-        const origOnMilestone = comboSystem.onMilestone;
-        comboSystem.onMilestone = function(level, milestone) {
-          if (origOnMilestone) {
-            try { origOnMilestone(level, milestone); } catch(e) {}
-          }
-          showMilestone(level, milestone);
-        };
-
-        const origOnEureka = comboSystem.onEureka;
-        comboSystem.onEureka = function(type) {
-          if (origOnEureka) {
-            try { origOnEureka(type); } catch(e) {}
-          }
-          // 灵感型 EUREKA 也显示里程碑特效
-          if (type === 'insight') {
-            showMilestone('灵感', { key: 'eureka', label: '灵感迸发！' });
-          }
-        };
-
-        const origOnFlowStateChange = comboSystem.onFlowStateChange;
-        comboSystem.onFlowStateChange = function(state, depth) {
-          if (origOnFlowStateChange) {
-            try { origOnFlowStateChange(state, depth); } catch(e) {}
-          }
-          updateFlowState(state);
-        };
-
-        // onBreak 回调（之前可能未设置）
-        const origOnBreak = comboSystem.onBreak;
-        comboSystem.onBreak = function(reason, oldCount) {
-          if (origOnBreak) {
-            try { origOnBreak(reason, oldCount); } catch(e) {}
-          }
-          showBreak(reason, oldCount);
-        };
-
-        // 暴露到全局便于调试
-        global.comboUI = {
-          updateComboDisplay,
-          updateFlowState,
-          showMilestone,
-          showBreak,
-          triggerBossIntimidation
-        };
-      })();
-    }
-
-    // Initialize Comedy System (吐槽系统)
-    if (typeof ComedySystem !== 'undefined') {
-      comedySystem = new ComedySystem({
-        idleThresholdMs: 60000,
-      });
-      comedySystem.setShowBubble((charId, opts) => {
-        showCharacterBubble(charId, opts);
-      });
-      comedySystem.setMutedCheck(() => {
-        // 防火墙：以下情况静音
-        // 1. 教学引导激活时
-        if (lessonPlayer && lessonPlayer.isActive) return true;
-        // 2. 三幕引导对话播放中（通过 storyEngine 检测）
-        if (storyEngine && storyEngine._isPlaying) return true;
-        // 3. 剧情对话播放中
-        if (storyEngine && storyEngine._isPlaying) return true;
-        // 4. 提示气泡显示中（角色气泡正在显示提示内容）
-        if (CharBubble.isVisible()) return true;
-        // 5. Boss 战中
-        if (bossBattleStarted) return true;
-        // 6. 暂停或已通关
-        if (isPaused || isCompleted) return true;
-        // 7. 自动提示临时静音（提示期间喜剧静音
-        if (Date.now() < _autoHintMuteUntil) return true;
-        return false;
-      });
-      comedySystem.reset(currentLevelId);
-      global.guideComedySystem = comedySystem;
-    }
-
-    bindEvents();
-
-    // 应用关卡功能配置（渐进式解锁）
-    applyLevelFeatures();
-
-    // Connect settings panel to board
-    if (settingsPanel) {
-      settingsPanel.setBoard(board);
-      settingsPanel.setRenderer(renderer);
-    }
-
-    // Initialize UI state
-    updateNoteButtonState();
-    updateNumBtnCompletedState();
-    updateMultiSelectHint();
-    updateNumPad();
-
-    // 更新顶部关卡标题（含编号和名称）
-    const levelTitleEl = document.getElementById('level-title');
-    const landscapeTitleEl = document.getElementById('landscape-level-title');
-    if (currentLevelData) {
-      const titleText = currentLevelData.title || '';
-      const fullTitle = `第${currentLevelId}关 · ${titleText}`;
-      const tooltip = `关卡 ${currentLevelId}：${titleText}`;
-      if (levelTitleEl) {
-        levelTitleEl.textContent = fullTitle;
-        levelTitleEl.title = tooltip;
-      }
-      if (landscapeTitleEl) {
-        landscapeTitleEl.textContent = fullTitle;
-        landscapeTitleEl.title = tooltip;
-      }
-    }
-
-    // 预加载初始热力图到 WinConditionManager 缓存（异步，不阻塞 UI）
-    _preloadPristineHeatmap();
+  function initBoard(levelData) {
+    const result = gameController.initBoard(levelData);
+    // 同步 board/renderer 到 guide.js 闭包（保持向后兼容）
+    board = gameController.board;
+    renderer = gameController.renderer;
+    hintSystem = gameController.hintSystem;
+    techMatrix = gameController.techMatrix;
+    // 初始化 WhatIfManager（需要 board 和 renderer）
+    _initWhatIfManager();
+    return result;
   }
 
   // === Apply Level Features (渐进式功能解锁) ===
@@ -5353,46 +4740,18 @@
   }
 
   // ============================================================
-  //  What If 假设模式（分支快照系统）
+  //  What If 假设模式（分支快照系统）— 已迁移到 WhatIfManager.js
+  //  WhatIfState 指向 whatIfManager 实例（保持向后兼容）
   // ============================================================
-  const WhatIfState = {
-    active: false,
-    rootSnapshot: null,      // 根状态快照（进入时保存）
-    snapshots: [],           // 快照栈（最多3个）
-    maxSnapshots: 3,
-    currentIndex: -1,        // 当前查看的快照索引（-1 表示最新状态）
-    rootLevelTitle: '',      // 保存原关卡名
-  };
+  let WhatIfState = null; // 将在 _initWhatIfManager 中赋值
 
   /**
    * 创建棋盘快照（深拷贝关键状态）
    */
   function _createWhatIfSnapshot(label) {
-    if (!board) return null;
-    const snapshot = {
-      label: label || '',
-      // 深拷贝格子数据
-      cells: board.cells.map(row => row.map(cell => ({
-        fillNum: cell.fillNum,
-        fixedNum: cell.fixedNum,
-        candidates: new Set(cell.candidates),
-        eliminations: new Set(cell.eliminations),
-        isError: cell.isError,
-        tempWrongNum: cell.tempWrongNum,
-        isLocked: cell.isLocked,
-      }))),
-      // 选中状态
-      selectedCell: board.selectedCell ? { ...board.selectedCell } : null,
-      selectedCells: board.selectedCells.map(c => ({ ...c })),
-      selectedCageId: board.selectedCageId,
-      selectedCageIds: [...(board.selectedCageIds || [])],
-      // 历史记录
-      history: board.history ? [...board.history] : [],
-      redoStack: board.redoStack ? [...board.redoStack] : [],
-      // 时间戳
-      timestamp: Date.now(),
-    };
-    return snapshot;
+
+    return whatIfManager._createWhatIfSnapshot(label);
+
   }
 
   /**
@@ -5402,267 +4761,54 @@
    * @returns {boolean}
    */
   function _hasChangesFromRoot(rootSnapshot) {
-    if (!board || !rootSnapshot || !rootSnapshot.cells) return false;
-    for (let r = 0; r < board.size; r++) {
-      for (let c = 0; c < board.size; c++) {
-        const src = rootSnapshot.cells[r][c];
-        const dst = board.cells[r][c];
-        if (src.fillNum !== dst.fillNum) return true;
-        if (src.candidates.size !== dst.candidates.size) return true;
-      }
-    }
-    return false;
+
+    return whatIfManager._hasChangesFromRoot(rootSnapshot);
+
   }
 
   /**
    * 从快照恢复棋盘状态
    */
   function _restoreWhatIfSnapshot(snapshot) {
-    if (!board || !snapshot) return;
 
-    // 恢复格子数据
-    for (let r = 0; r < board.size; r++) {
-      for (let c = 0; c < board.size; c++) {
-        const src = snapshot.cells[r][c];
-        const dst = board.cells[r][c];
-        dst.fillNum = src.fillNum;
-        dst.fixedNum = src.fixedNum;
-        dst.candidates = new Set(src.candidates);
-        dst.eliminations = new Set(src.eliminations);
-        dst.isError = src.isError;
-        dst.tempWrongNum = src.tempWrongNum;
-        dst.isLocked = src.isLocked;
-        dst.isSelected = false;
-      }
-    }
+    return whatIfManager._restoreWhatIfSnapshot(snapshot);
 
-    // 恢复选中状态
-    board.selectedCell = snapshot.selectedCell ? { ...snapshot.selectedCell } : null;
-    board.selectedCells = snapshot.selectedCells.map(c => ({ ...c }));
-    board.selectedCageId = snapshot.selectedCageId;
-    board.selectedCageIds = [...(snapshot.selectedCageIds || [])];
-
-    // 重新设置选中标记
-    if (board.selectedCell) {
-      const { r, c } = board.selectedCell;
-      if (board.cells[r] && board.cells[r][c]) {
-        board.cells[r][c].isSelected = true;
-      }
-    }
-    for (const sc of board.selectedCells) {
-      if (board.cells[sc.r] && board.cells[sc.r][sc.c]) {
-        board.cells[sc.r][sc.c].isSelected = true;
-      }
-    }
-
-    // 恢复历史
-    board.history = snapshot.history ? [...snapshot.history] : [];
-    board.redoStack = snapshot.redoStack ? [...snapshot.redoStack] : [];
-
-    // 重绘
-    if (renderer) {
-      renderer.forceRender = true;
-      renderer.render(board);
-    }
-
-    // 更新45法则HUD
-    if (board.size === 9 && typeof updateRule45Banner === 'function') {
-      updateRule45Banner(board.selectedCell || board.selectedCells[0]);
-    }
   }
 
   /**
    * 生成快照缩略图（使用离屏canvas）
    */
   function _createSnapshotThumbnail(snapshot, index) {
-    if (!board || !renderer) return '';
-    try {
-      const size = 56;
-      const offscreen = document.createElement('canvas');
-      offscreen.width = size * board.size;
-      offscreen.height = size * board.size;
-      const ctx = offscreen.getContext('2d');
 
-      // 简化渲染：只画格子和数字
-      const cellSize = size;
-      // 背景
-      ctx.fillStyle = '#0f1115';
-      ctx.fillRect(0, 0, offscreen.width, offscreen.height);
+    return whatIfManager._createSnapshotThumbnail(snapshot, index);
 
-      // 网格线
-      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-      ctx.lineWidth = 1;
-      for (let i = 0; i <= board.size; i++) {
-        ctx.beginPath();
-        ctx.moveTo(i * cellSize, 0);
-        ctx.lineTo(i * cellSize, offscreen.height);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(0, i * cellSize);
-        ctx.lineTo(offscreen.width, i * cellSize);
-        ctx.stroke();
-      }
-
-      // 宫线
-      const boxW = board.size === 9 ? 3 : (board.size === 6 ? 3 : 2);
-      const boxH = board.size === 9 ? 3 : (board.size === 6 ? 2 : 2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-      ctx.lineWidth = 2;
-      for (let i = 0; i <= board.size; i += boxW) {
-        ctx.beginPath();
-        ctx.moveTo(i * cellSize, 0);
-        ctx.lineTo(i * cellSize, offscreen.height);
-        ctx.stroke();
-      }
-      for (let i = 0; i <= board.size; i += boxH) {
-        ctx.beginPath();
-        ctx.moveTo(0, i * cellSize);
-        ctx.lineTo(offscreen.width, i * cellSize);
-        ctx.stroke();
-      }
-
-      // 数字
-      ctx.font = `600 ${Math.floor(cellSize * 0.6)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      for (let r = 0; r < board.size; r++) {
-        for (let c = 0; c < board.size; c++) {
-          const cell = snapshot.cells[r][c];
-          const num = cell.fillNum || cell.fixedNum;
-          if (num > 0) {
-            ctx.fillStyle = cell.fixedNum ? '#e8eaed' : '#60a5fa';
-            ctx.fillText(String(num), c * cellSize + cellSize / 2, r * cellSize + cellSize / 2);
-          }
-        }
-      }
-
-      return offscreen.toDataURL();
-    } catch (e) {
-      return '';
-    }
   }
 
   /**
    * 渲染快照卡片到右侧浮条（扑克牌式堆叠）
    */
   function _renderWhatIfSnapshots() {
-    const container = document.getElementById('snapshot-cards');
-    if (!container) return;
 
-    container.innerHTML = '';
+    return whatIfManager._renderWhatIfSnapshots();
 
-    WhatIfState.snapshots.forEach((snap, index) => {
-      const card = document.createElement('div');
-      card.className = 'snapshot-card';
-      if (index === WhatIfState.snapshots.length - 1 && WhatIfState.currentIndex === -1) {
-        card.classList.add('active');
-      } else if (index === WhatIfState.currentIndex) {
-        card.classList.add('active');
-      }
-
-      // 缩略图
-      if (snap.thumbnail) {
-        const img = document.createElement('img');
-        img.src = snap.thumbnail;
-        img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
-        card.appendChild(img);
-      }
-
-      // 索引徽章
-      const indexBadge = document.createElement('div');
-      indexBadge.className = 'snapshot-index';
-      indexBadge.textContent = String(index + 1);
-      card.appendChild(indexBadge);
-
-      // 标签
-      const label = document.createElement('div');
-      label.className = 'snapshot-label';
-      label.textContent = snap.label || `#${index + 1}`;
-      card.appendChild(label);
-
-      // 点击跳转
-      card.addEventListener('click', () => {
-        AudioService.sfx.play?.('click');
-        jumpToWhatIfSnapshot(index);
-      });
-
-      container.appendChild(card);
-    });
-
-    // 更新拉扣头徽章数量
-    _updateFloatBarBadge();
-
-    // 同步到 PC 端快照面板
-    _syncWhatIfSnapshotsToPc();
   }
 
   /**
    * 更新拉扣头上的徽章数量
    */
   function _updateFloatBarBadge() {
-    const badge = document.getElementById('float-bar-tab-badge');
-    const count = WhatIfState.snapshots.length;
-    if (badge) {
-      if (count > 0 && WhatIfState.active) {
-        badge.style.display = 'flex';
-        badge.textContent = String(count);
-      } else {
-        badge.style.display = 'none';
-      }
-    }
-    // 同步 PC 端计数
-    const pcCount = document.getElementById('pc-whatif-count');
-    if (pcCount) {
-      pcCount.textContent = '分支 ' + count + '/3';
-    }
+
+    return whatIfManager._updateFloatBarBadge();
+
   }
 
   /**
    * 同步 What If 快照卡片到 PC 端面板
    */
   function _syncWhatIfSnapshotsToPc() {
-    const pcContainer = document.getElementById('pc-snapshot-cards');
-    if (!pcContainer) return;
 
-    pcContainer.innerHTML = '';
+    return whatIfManager._syncWhatIfSnapshotsToPc();
 
-    WhatIfState.snapshots.forEach((snap, index) => {
-      const card = document.createElement('div');
-      card.className = 'pc-snapshot-card';
-      if (index === WhatIfState.snapshots.length - 1 && WhatIfState.currentIndex === -1) {
-        card.classList.add('active');
-      } else if (index === WhatIfState.currentIndex) {
-        card.classList.add('active');
-      }
-
-      // 缩略图
-      if (snap.thumbnail) {
-        const img = document.createElement('img');
-        img.src = snap.thumbnail;
-        img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
-        card.appendChild(img);
-      }
-
-      // 索引徽章
-      const indexBadge = document.createElement('div');
-      indexBadge.className = 'snapshot-index';
-      indexBadge.textContent = String(index + 1);
-      card.appendChild(indexBadge);
-
-      // 标签
-      const label = document.createElement('div');
-      label.className = 'snapshot-label';
-      label.textContent = snap.label || `#${index + 1}`;
-      card.appendChild(label);
-
-      // 点击跳转
-      card.addEventListener('click', () => {
-        AudioService.sfx.play?.('click');
-        jumpToWhatIfSnapshot(index);
-      });
-
-      pcContainer.appendChild(card);
-    });
   }
 
   /**
@@ -5720,212 +4866,45 @@
    * 进入 What If 模式
    */
   function enterWhatIfMode() {
-    if (WhatIfState.active || !board) return;
-    if (storyEngine && storyEngine._isPlaying) return;
-    if (isCompleted) return;
 
-    // 如果技术矩阵已打开，先关闭它（平滑过渡）
-    const techMatrixVisible = techMatrix && techMatrix.visible;
-    if (techMatrixVisible) {
-      techMatrix.hide();
-      // 等待技术矩阵滑出后再进入 What If 模式
-      setTimeout(() => {
-        _doEnterWhatIf();
-      }, 300);
-      return;
-    }
+    return whatIfManager.enterMode();
 
-    _doEnterWhatIf();
   }
 
   /**
    * 实际执行进入 What If 模式的逻辑
    */
   function _doEnterWhatIf() {
-    // 保存根状态
-    WhatIfState.rootSnapshot = _createWhatIfSnapshot('root');
-    WhatIfState.snapshots = [];
-    WhatIfState.currentIndex = -1;
-    WhatIfState.active = true;
 
-    // 保存原关卡名
-    const titleEl = document.getElementById('level-title');
-    if (titleEl) {
-      WhatIfState.rootLevelTitle = titleEl.textContent;
-    }
+    return whatIfManager._doEnter();
 
-    // 添加视觉标记
-    document.body.classList.add('whatif-mode');
-
-    // 显示右侧浮条（拉扣头 + 快照面板）
-    const stack = document.getElementById('whatif-snapshot-stack');
-    const hintProg = document.getElementById('hint-progress-indicator');
-    showFloatBar(false); // 显示拉扣头，面板默认收起
-    if (stack) stack.style.display = 'flex';
-    if (hintProg) hintProg.style.display = 'none';
-    _updateFloatBarTabIcon();
-    _updateFloatBarBadge();
-
-    // 更新按钮状态 —— 使用 active 类而非内联样式
-    const btn = document.getElementById('btn-whatif');
-    if (btn) {
-      btn.classList.add('active');
-    }
-    // 同步 PC 端按钮
-    const pcWhatIfBtn = document.getElementById('pc-btn-whatif');
-    if (pcWhatIfBtn) {
-      pcWhatIfBtn.classList.add('active');
-    }
-
-    // 更新提示按钮（禁用）—— 移动端用内联样式，PC端通过CSS .whatif-mode 控制
-    const hintBtn = document.getElementById('btn-hint');
-    if (hintBtn) {
-      hintBtn.style.opacity = '0.4';
-      hintBtn.style.pointerEvents = 'none';
-      hintBtn.title = '假设模式下提示不可用';
-    }
-
-    // 阻止安卓返回键（popstate 拦截）
-    try {
-      history.pushState({ whatIf: true }, '');
-    } catch (e) {}
-
-    AudioService.sfx.play?.('select');
-    showToast('已进入假设模式，最多保存 3 个分支快照');
-
-    // === 教学引导：通知 LessonPlayer 玩家进入了 What If 模式 ===
-    if (lessonPlayer && lessonPlayer.isActive && typeof lessonPlayer.handleWhatIfEnter === 'function') {
-      const whatIfResult = lessonPlayer.handleWhatIfEnter();
-      if (whatIfResult && whatIfResult.handled && whatIfResult.correct) {
-        // 成功进入 What If 模式的教学反馈
-        AudioService.sfx.play('fill_correct');
-      }
-    }
   }
 
   /**
    * 退出 What If 模式（回到根状态）
    */
   function exitWhatIfMode(adoptChanges) {
-    if (!WhatIfState.active) return;
 
-    if (!adoptChanges) {
-      // 回退到根状态
-      if (WhatIfState.rootSnapshot) {
-        _restoreWhatIfSnapshot(WhatIfState.rootSnapshot);
-      }
-    }
+    return whatIfManager.exitMode(adoptChanges);
 
-    WhatIfState.active = false;
-    WhatIfState.rootSnapshot = null;
-    WhatIfState.snapshots = [];
-    WhatIfState.currentIndex = -1;
-
-    // 移除视觉标记
-    document.body.classList.remove('whatif-mode');
-
-    // 恢复关卡名
-    const titleEl = document.getElementById('level-title');
-    if (titleEl && WhatIfState.rootLevelTitle) {
-      titleEl.textContent = WhatIfState.rootLevelTitle;
-      WhatIfState.rootLevelTitle = '';
-    }
-
-    // 隐藏右侧浮条
-    const stack = document.getElementById('whatif-snapshot-stack');
-    hideFloatBar();
-    if (stack) stack.style.display = 'none';
-
-    // 恢复按钮状态 —— 使用 active 类而非内联样式
-    const btn = document.getElementById('btn-whatif');
-    if (btn) {
-      btn.classList.remove('active');
-    }
-    // 同步 PC 端按钮
-    const pcWhatIfBtn = document.getElementById('pc-btn-whatif');
-    if (pcWhatIfBtn) {
-      pcWhatIfBtn.classList.remove('active');
-    }
-
-    // 恢复提示按钮
-    const hintBtn = document.getElementById('btn-hint');
-    if (hintBtn) {
-      hintBtn.style.opacity = '';
-      hintBtn.style.pointerEvents = '';
-      hintBtn.title = '提示 (H)';
-    }
-
-    // 清理历史状态
-    try {
-      if (history.state && history.state.whatIf) {
-        history.back();
-      }
-    } catch (e) {}
-
-    AudioService.sfx.play?.('click');
   }
 
   /**
    * 切换 What If 模式
    */
   function toggleWhatIfMode() {
-    if (WhatIfState.active) {
-      // 退出时询问是否采纳
-      if (WhatIfState.snapshots.length > 0 || WhatIfState.rootSnapshot) {
-        // 简单处理：直接回退（长按或菜单可以有采纳选项）
-        exitWhatIfMode(false);
-        showToast('已退出假设模式，更改已撤销');
-      } else {
-        exitWhatIfMode(false);
-      }
-    } else {
-      enterWhatIfMode();
-    }
+
+    return whatIfManager.toggleMode();
+
   }
 
   /**
    * 添加一个快照（填数后自动调用）
    */
   function addWhatIfSnapshot(label) {
-    if (!WhatIfState.active || !board) return;
 
-    const snap = _createWhatIfSnapshot(label);
-    if (!snap) return;
+    return whatIfManager.addSnapshot(label);
 
-    // 生成缩略图
-    snap.thumbnail = _createSnapshotThumbnail(snap, WhatIfState.snapshots.length);
-
-    // 滚动覆盖：超过上限时移除最旧的
-    if (WhatIfState.snapshots.length >= WhatIfState.maxSnapshots) {
-      WhatIfState.snapshots.shift();
-      showToast('已覆盖最早的分支快照');
-    }
-
-    WhatIfState.snapshots.push(snap);
-    WhatIfState.currentIndex = -1; // -1 表示当前是最新状态
-
-    _renderWhatIfSnapshots();
-
-    // 新快照滑入动画：给最新的快照卡片添加 new-snapshot 类
-    const latestIdx = WhatIfState.snapshots.length - 1;
-    const container = document.getElementById('snapshot-cards');
-    if (container && container.children[latestIdx]) {
-      const card = container.children[latestIdx];
-      card.classList.add('new-snapshot');
-      setTimeout(() => card.classList.remove('new-snapshot'), 500);
-    }
-    // PC 端同步
-    const pcContainer = document.getElementById('pc-snapshot-cards');
-    if (pcContainer && pcContainer.children[latestIdx]) {
-      const pcCard = pcContainer.children[latestIdx];
-      pcCard.classList.add('new-snapshot');
-      setTimeout(() => pcCard.classList.remove('new-snapshot'), 500);
-    }
-
-    // 快照生成闪光效果
-    if (renderer && board.selectedCell) {
-      renderer.triggerFillAnimation?.(board.selectedCell.r, board.selectedCell.c, 200);
-    }
   }
 
   /**
@@ -5933,86 +4912,59 @@
    * P2优化：移除200ms延迟，使用快速过渡（<100ms），无白屏
    */
   function jumpToWhatIfSnapshot(index) {
-    if (!WhatIfState.active || !WhatIfState.snapshots[index]) return;
 
-    const snap = WhatIfState.snapshots[index];
-    WhatIfState.currentIndex = index;
+    return whatIfManager.jumpToSnapshot(index);
 
-    // 快速淡入淡出效果（100ms，无白屏）
-    const canvas = document.getElementById('gameCanvas');
-    if (canvas) {
-      canvas.style.transition = 'opacity 0.1s ease-out';
-      canvas.style.opacity = '0.6';
-      // 下一帧立即恢复数据并重绘
-      requestAnimationFrame(() => {
-        _restoreWhatIfSnapshot(snap);
-        requestAnimationFrame(() => {
-          canvas.style.opacity = '1';
-          setTimeout(() => { canvas.style.transition = ''; }, 110);
-        });
-      });
-    } else {
-      _restoreWhatIfSnapshot(snap);
-    }
-
-    _renderWhatIfSnapshots();
-    AudioService.sfx.play?.('select');
   }
 
   /**
    * 回退一步（弹出栈顶快照）
    */
   function undoWhatIfStep() {
-    if (!WhatIfState.active) return;
 
-    if (WhatIfState.snapshots.length === 0) {
-      // 没有快照了，退出 What If
-      exitWhatIfMode(false);
-      showToast('已退出假设模式');
-      return;
-    }
+    return whatIfManager.undoStep();
 
-    // 弹出最新快照
-    WhatIfState.snapshots.pop();
-
-    if (WhatIfState.snapshots.length > 0) {
-      // 恢复到上一个快照
-      const prevSnap = WhatIfState.snapshots[WhatIfState.snapshots.length - 1];
-      WhatIfState.currentIndex = WhatIfState.snapshots.length - 1;
-      _restoreWhatIfSnapshot(prevSnap);
-    } else {
-      // 回到根状态
-      WhatIfState.currentIndex = -1;
-      if (WhatIfState.rootSnapshot) {
-        _restoreWhatIfSnapshot(WhatIfState.rootSnapshot);
-      }
-    }
-
-    _renderWhatIfSnapshots();
-    AudioService.sfx.play?.('erase');
   }
 
   /**
    * 采纳当前假设（写入正式棋盘）
    */
   function adoptWhatIfChanges() {
-    if (!WhatIfState.active) return;
-    exitWhatIfMode(true);
-    showToast('已采纳假设，更改已保存');
+
+    return whatIfManager.adoptChanges();
+
   }
 
   /**
    * 彻底回退（回到根状态，不退出模式）
    */
   function resetWhatIfToRoot() {
-    if (!WhatIfState.active || !WhatIfState.rootSnapshot) return;
 
-    _restoreWhatIfSnapshot(WhatIfState.rootSnapshot);
-    WhatIfState.snapshots = [];
-    WhatIfState.currentIndex = -1;
-    _renderWhatIfSnapshots();
-    AudioService.sfx.play?.('erase');
-    showToast('已重置到假设起点');
+    return whatIfManager.resetToRoot();
+
+  }
+
+  // === WhatIfManager 初始化（第四阶段抽离） ===
+  function _initWhatIfManager() {
+    whatIfManager = new WhatIfManager({
+      board: board,
+      renderer: renderer,
+      techMatrix: techMatrix,
+      lessonPlayer: lessonPlayer,
+      AudioService: AudioService,
+      onShowToast: showToast,
+      onUpdateRule45Banner: updateRule45Banner,
+      isCompleted: () => isCompleted,
+      isStoryPlaying: () => storyEngine && storyEngine._isPlaying,
+      onUpdateFloatBarTabIcon: _updateFloatBarTabIcon,
+    });
+    // 向后兼容：WhatIfState 指向 whatIfManager 实例
+    WhatIfState = whatIfManager;
+
+    // 同步到 gameController
+    if (gameController) {
+      gameController.whatIfManager = whatIfManager;
+    }
   }
 
   // === Technique Encyclopedia ===
@@ -9027,115 +7979,9 @@
 
   // === 印记解锁动画 ===
   function showSealUnlockAnimation(sealDef) {
-    // 播放特殊音效
-    try {
-      AudioService.sfx.play('seal_unlock');
-    } catch (e) {}
 
-    // 创建全屏动画容器
-    const overlay = document.createElement('div');
-    overlay.id = 'seal-unlock-overlay';
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;' +
-      'z-index:30000;display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-      'background:rgba(0,0,0,0.85);backdrop-filter:blur(8px);' +
-      'opacity:0;transition:opacity 0.5s ease;pointer-events:auto;cursor:pointer;';
+    return gameController.showSealUnlockAnimation(sealDef);
 
-    // 粒子/光晕效果层
-    const glow = document.createElement('div');
-    glow.style.cssText = 'position:absolute;width:300px;height:300px;border-radius:50%;' +
-      'background:radial-gradient(circle,' + sealDef.color + '40 0%,transparent 70%);' +
-      'filter:blur(20px);animation:seal-pulse 2s ease-in-out infinite;' +
-      'pointer-events:none;';
-    overlay.appendChild(glow);
-
-    // 印记图标
-    const icon = document.createElement('div');
-    icon.style.cssText = 'font-size:100px;margin-bottom:24px;' +
-      'text-shadow:0 0 40px ' + sealDef.color + 'cc;' +
-      'transform:scale(0);animation:seal-pop 0.8s cubic-bezier(0.34,1.56,0.64,1) 0.3s forwards;' +
-      'position:relative;z-index:1;';
-    icon.textContent = sealDef.icon;
-    overlay.appendChild(icon);
-
-    // 印记名称
-    const name = document.createElement('div');
-    name.style.cssText = 'font-size:28px;font-weight:900;color:' + sealDef.color + ';' +
-      'letter-spacing:8px;margin-bottom:8px;' +
-      'text-shadow:0 0 20px ' + sealDef.color + '80;' +
-      'opacity:0;transform:translateY(20px);animation:seal-fade-up 0.6s ease 0.8s forwards;' +
-      'position:relative;z-index:1;';
-    name.textContent = sealDef.name;
-    overlay.appendChild(name);
-
-    // 副标题
-    const subtitle = document.createElement('div');
-    subtitle.style.cssText = 'font-size:14px;color:#94a3b8;letter-spacing:4px;' +
-      'opacity:0;transform:translateY(20px);animation:seal-fade-up 0.6s ease 1s forwards;' +
-      'position:relative;z-index:1;';
-    subtitle.textContent = '✦ SEAL AWAKENED ✦';
-    overlay.appendChild(subtitle);
-
-    // 描述
-    const desc = document.createElement('div');
-    desc.style.cssText = 'font-size:13px;color:#64748b;max-width:320px;text-align:center;' +
-      'line-height:1.8;margin-top:20px;' +
-      'opacity:0;transform:translateY(20px);animation:seal-fade-up 0.6s ease 1.2s forwards;' +
-      'position:relative;z-index:1;';
-    desc.textContent = sealDef.desc;
-    overlay.appendChild(desc);
-
-    // 点击提示
-    const hint = document.createElement('div');
-    hint.style.cssText = 'font-size:12px;color:#475569;margin-top:32px;' +
-      'letter-spacing:2px;' +
-      'opacity:0;animation:seal-blink 1.5s ease-in-out 1.8s infinite;' +
-      'position:relative;z-index:1;';
-    hint.textContent = '点 击 继 续';
-    overlay.appendChild(hint);
-
-    // 添加动画样式
-    const style = document.createElement('style');
-    style.textContent = `
-      @keyframes seal-pulse {
-        0%, 100% { transform: scale(1); opacity: 0.6; }
-        50% { transform: scale(1.3); opacity: 1; }
-      }
-      @keyframes seal-pop {
-        0% { transform: scale(0) rotate(-180deg); opacity: 0; }
-        60% { transform: scale(1.2) rotate(10deg); }
-        100% { transform: scale(1) rotate(0deg); opacity: 1; }
-      }
-      @keyframes seal-fade-up {
-        from { opacity: 0; transform: translateY(20px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-      @keyframes seal-blink {
-        0%, 100% { opacity: 0.3; }
-        50% { opacity: 1; }
-      }
-    `;
-    document.head.appendChild(style);
-
-    document.body.appendChild(overlay);
-
-    // 淡入
-    requestAnimationFrame(function() {
-      overlay.style.opacity = '1';
-    });
-
-    // 点击关闭
-    function closeOverlay() {
-      overlay.style.opacity = '0';
-      setTimeout(function() {
-        overlay.remove();
-        style.remove();
-      }, 500);
-    }
-
-    overlay.addEventListener('click', closeOverlay);
-
-    // 自动关闭（最长 8 秒）
-    setTimeout(closeOverlay, 8000);
   }
 
   // === 技巧使用记录（用于技巧类成就） ===
@@ -9182,37 +8028,9 @@
    * @returns {string|null} 技巧ID（TechRater 风格，如 'nakedSingle'），无法检测则返回 null
    */
   function detectTechniqueForFill(r, c, num) {
-    if (!board) return null;
 
-    try {
-      const TechRaterClass = typeof TechRater !== 'undefined'
-        ? TechRater
-        : (global.TechRater || null);
-      if (!TechRaterClass) return null;
+    return gameController.detectTechniqueForFill(r, c, num);
 
-      // 从当前棋盘状态创建 TechRater 实例
-      const techRater = new TechRaterClass(board);
-      if (!techRater.findNextStep || !techRater._fillCell) return null;
-
-      const maxSteps = techRater.size * techRater.size;
-
-      // 逐步求解，直到目标格被解出或达到最大步数
-      for (let i = 0; i < maxSteps; i++) {
-        const step = techRater.findNextStep();
-        if (!step) break;
-
-        if (step.row === r && step.col === c) {
-          // 目标格被解出，返回使用的技巧
-          return step.technique;
-        }
-
-        // 应用这一步，继续求解
-        techRater._fillCell(step.row, step.col, step.num);
-      }
-    } catch (e) {
-      console.warn('[detectTechniqueForFill] 检测失败:', e);
-    }
-    return null;
   }
 
   /**
@@ -9221,37 +8039,9 @@
    * @param {string} techniqueName - 技巧名（中文名或TechRater ID）
    */
   function recordTechniqueUsage(techniqueName) {
-    if (!global.ProgressManager || !techniqueName) return;
 
-    // 中文名 -> TechRater ID
-    let techId = TECHNIQUE_NAME_TO_ID[techniqueName];
-    if (!techId) {
-      // 如果已经是 TechRater 风格 ID，直接使用
-      techId = techniqueName;
-    }
+    return gameController.recordTechniqueUsage(techniqueName);
 
-    // 使用 ProgressManager 的新 API（自动累计 + 成就检测）
-    if (typeof ProgressManager.addSkillUsage === 'function') {
-      ProgressManager.addSkillUsage(techId);
-    } else {
-      // 回退：旧版 addSkillCount
-      const statMap = {
-        'nakedSingle': 'nakedSingle',
-        'hiddenSingle': 'hiddenSingle',
-        'rule45': 'rule45',
-        'nakedPair': 'nakedPair',
-        'hiddenPair': 'hiddenPair',
-        'pointingClaiming': 'pointingPair',
-        'cageUnique': 'cageSum',
-        'nakedTriplet': 'nakedTriplet',
-        'xWing': 'xWing',
-        'swordfish': 'swordfish',
-      };
-      const statKey = statMap[techId];
-      if (statKey) {
-        ProgressManager.addSkillCount(statKey, 1);
-      }
-    }
   }
 
   // === 成就解锁Toast ===
@@ -9289,38 +8079,9 @@
 
   // === Grade Calculation ===
   function calculateGrade(elapsedSeconds, errors, hints) {
-    // Estimate expected time based on grid size and difficulty
-    const gridSize = currentLevelData ? (currentLevelData.gridSize || 9) : 9;
-    const baseTime = gridSize <= 4 ? 60 : gridSize <= 6 ? 180 : 360;
 
-    // Apply cycle difficulty modifiers
-    let timeMultiplier = 1.0;
-    let errorPenaltyMult = 1.0;
-    if (global.ProgressManager) {
-      const mods = ProgressManager.getCycleModifiers();
-      timeMultiplier = mods.timeMultiplier;
-      errorPenaltyMult = mods.errorPenalty / 0.15;
-    }
+    return gameController.calculateGrade(elapsedSeconds, errors, hints);
 
-    // Penalty factors
-    const timeRatio = elapsedSeconds / (baseTime * timeMultiplier);
-    const errorPenalty = errors * 0.15 * errorPenaltyMult;
-    const hintPenalty = hints * 0.1;
-
-    // Score: 100 base, subtract penalties
-    let score = 100;
-    score -= Math.max(0, (timeRatio - 0.5) * 40); // More than 50% of base time starts penalty
-    score -= errorPenalty * 100;
-    score -= hintPenalty * 100;
-
-    let letter, color;
-    if (score >= 90) { letter = 'S'; color = '#fbbf24'; }
-    else if (score >= 75) { letter = 'A'; color = '#22c55e'; }
-    else if (score >= 60) { letter = 'B'; color = '#3b82f6'; }
-    else if (score >= 40) { letter = 'C'; color = '#a855f7'; }
-    else { letter = 'D'; color = '#ef4444'; }
-
-    return { letter, color, score: Math.max(0, Math.min(100, score)) };
   }
 
   // === Play Clear Dialog ===
@@ -9360,31 +8121,17 @@
 
   // === Next Level ===
   function setupNextLevel() {
-    const btn = document.getElementById('btn-next-level');
-    if (btn) {
-      btn.addEventListener('click', () => {
-        handleNextLevel();
-      });
-    }
+
+    return gameController.setupNextLevel();
+
   }
 
   function updateNextLevelButton() {
-    const btn = document.getElementById('btn-next-level');
-    if (!btn) return;
 
-    const isHiddenLevel = currentLevelData && currentLevelData.isHidden;
-    const isLastLevel = isLastLevelOfChapter();
-    const isLastChapter = isLastChapterOfGame();
 
-    if (isHiddenLevel) {
-      btn.textContent = '返回章节选择';
-    } else if (isLastLevel && isLastChapter) {
-      btn.textContent = '查看结局';
-    } else if (isLastLevel) {
-      btn.textContent = '进入结局';
-    } else {
-      btn.textContent = '下一关';
-    }
+    return gameController.updateNextLevelButton();
+
+
   }
 
   function isLastLevelOfChapter() {
@@ -9412,54 +8159,11 @@
   }
 
   function handleNextLevel() {
-    const isLast = isLastLevelOfChapter();
-    const isHiddenLevel = currentLevelData && currentLevelData.isHidden;
 
-    // 隐藏关通关后返回章节选择
-    if (isHiddenLevel) {
-      const overlay = document.getElementById('complete-overlay');
-      if (overlay) overlay.style.display = 'none';
-      if (chapterSelect) {
-        chapterSelect._render();
-        chapterSelect.show();
-      }
-      return;
-    }
 
-    if (isLast) {
-      // Chapter end: play epilogue then transition
-      playChapterEpilogue(() => {
-        if (isLastChapterOfGame()) {
-          showGameEnding();
-        } else {
-          showChapterTransition(() => {
-            goToNextChapter();
-          });
-        }
-      });
-    } else {
-      // Normal next level: 从当前章节中找到下一个非隐藏关卡
-      const nextLevelId = _findNextLevelId(currentLevelId);
-      if (nextLevelId) {
-        if (startedFromSelect && chapterSelect) {
-          // Use in-page navigation when coming from chapter select
-          startLevel(nextLevelId);
-          // Hide completion overlay
-          const overlay = document.getElementById('complete-overlay');
-          if (overlay) overlay.style.display = 'none';
-        } else {
-          navigateTo('guide.html?id=' + nextLevelId);
-        }
-      } else {
-        // Fallback: try currentLevelId + 1
-        const fallbackId = currentLevelId + 1;
-        if (startedFromSelect && chapterSelect) {
-          startLevel(fallbackId);
-        } else {
-          navigateTo('guide.html?id=' + fallbackId);
-        }
-      }
-    }
+    return gameController.handleNextLevel();
+
+
   }
 
   /**
@@ -9468,19 +8172,9 @@
    * @returns {number|null} 下一关的ID，如果没有则返回null
    */
   function _findNextLevelId(currentId) {
-    if (!currentChapterData || !currentChapterData.levels) return null;
-    const levels = currentChapterData.levels;
-    const numId = parseInt(currentId);
-    const currentIndex = levels.findIndex(lvl => parseInt(lvl.levelId) === numId);
-    if (currentIndex === -1) return null;
 
-    // 从下一个关卡开始找，跳过隐藏关
-    for (let i = currentIndex + 1; i < levels.length; i++) {
-      if (!levels[i].isHidden) {
-        return parseInt(levels[i].levelId);
-      }
-    }
-    return null; // 没有更多非隐藏关卡
+    return gameController._findNextLevelId(currentId);
+
   }
 
   // === Chapter Epilogue ===
@@ -9560,26 +8254,11 @@
   }
 
   function goToNextChapter() {
-    const nextChapterId = currentChapterData.chapterId + 1;
-    const nextChapter = findChapterById(nextChapterId);
-    if (nextChapter && nextChapter.levels && nextChapter.levels.length > 0) {
-      // 找到第一个非隐藏关卡
-      const firstNormalLevel = nextChapter.levels.find(function(lvl) { return !lvl.isHidden; });
-      const firstLevelId = firstNormalLevel ? parseInt(firstNormalLevel.levelId) : parseInt(nextChapter.levels[0].levelId);
-      if (startedFromSelect && chapterSelect) {
-        // In-page navigation
-        startLevel(firstLevelId);
-      } else {
-        navigateTo('guide.html?id=' + firstLevelId);
-      }
-    } else {
-      // Fallback: try currentLevelId + 1
-      if (startedFromSelect && chapterSelect) {
-        startLevel(parseInt(currentLevelId) + 1);
-      } else {
-        navigateTo('guide.html?id=' + (parseInt(currentLevelId) + 1));
-      }
-    }
+
+
+    return gameController.goToNextChapter();
+
+
   }
 
   // === Game Ending ===
@@ -9997,32 +8676,27 @@
   }
 
   function restartLevel() {
-    hidePauseMenu();
-    // 延迟一下再开始，让暂停菜单有时间消失
-    setTimeout(() => {
-      startLevel(currentLevelId);
-    }, 300);
+
+
+    return gameController.restartLevel();
+
+
   }
 
   function goToChapterSelect() {
-    hidePauseMenu();
-    if (chapterSelect) {
-      chapterSelect.show();
-    }
+
+
+    return gameController.goToChapterSelect();
+
+
   }
 
   function goToMainMenu() {
-    hidePauseMenu();
-    // 保存当前进度
-    if (global.ProgressManager && currentLevelId) {
-      ProgressManager.setLastPlayedLevel(currentLevelId);
-    }
-    // 重置三幕式 BGM
-    if (typeof ThreeActGuide !== 'undefined') {
-      try { ThreeActGuide.resetBgm(); } catch(e) {}
-    }
-    // 跳转到主菜单（带翻页过渡）
-    navigateTo('menu.html');
+
+
+    return gameController.goToMainMenu();
+
+
   }
 
   // === Toast (转发到 UIManager) ===
