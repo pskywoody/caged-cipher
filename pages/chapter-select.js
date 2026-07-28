@@ -334,6 +334,23 @@
     _data: null,
     _onAchievementUnlock: null,
 
+    // === DataStore 集成（渐进式，保持向后兼容） ===
+    _hasDataStore: function() {
+      return global.DataStore && typeof global.DataStore.get === 'function'
+        && typeof global.DataStore.set === 'function'
+        && global.DataStore.isInitialized();
+    },
+
+    _syncToDataStore: function() {
+      if (!this._hasDataStore() || !this._data) return;
+      try {
+        // 将进度数据同步到 DataStore 的 progress 分类
+        global.DataStore.set('progress', this._data, { immediate: false, delay: 500 });
+      } catch (e) {
+        console.warn('[ProgressManager] DataStore sync failed:', e);
+      }
+    },
+
     load() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -342,6 +359,8 @@
           if (result.ok) {
             this._data = result.data;
             this._migrate();
+            // 同步到 DataStore（如果可用）
+            this._syncToDataStore();
             return this._data;
           }
           // 主存档损坏，尝试从备份恢复
@@ -378,6 +397,9 @@
         const wrapped = this._wrapData(this._data);
         const jsonStr = JSON.stringify(wrapped);
         localStorage.setItem(STORAGE_KEY, jsonStr);
+
+        // 同步到 DataStore（如果可用）
+        this._syncToDataStore();
       } catch (e) {
         // 专门处理容量超限错误
         if (e.name === 'QuotaExceededError' || e.code === 22) {
@@ -389,6 +411,8 @@
             const wrapped = this._wrapData(this._data);
             localStorage.setItem(STORAGE_KEY, JSON.stringify(wrapped));
             console.log('[ProgressManager] Save succeeded after cleanup');
+            // 同步到 DataStore
+            this._syncToDataStore();
             return;
           } catch (e2) {
             console.warn('[ProgressManager] Save still failed after cleanup:', e2);
@@ -788,6 +812,12 @@
       }
       this._data = this._defaultData();
       this.save();
+      // 同步重置 DataStore 中的进度数据
+      if (this._hasDataStore()) {
+        try {
+          global.DataStore.set('progress', this._defaultData(), { immediate: false, delay: 200 });
+        } catch (e) { /* ignore */ }
+      }
     },
 
     // 成就回调设置

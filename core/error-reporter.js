@@ -35,14 +35,42 @@
     return 'err_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
   }
 
-  // ===== 从 localStorage 加载历史错误日志 =====
+  // ===== 检查 DataStore 是否可用 =====
+  function _hasDataStore() {
+    return global.DataStore && typeof global.DataStore.get === 'function'
+      && typeof global.DataStore.set === 'function'
+      && global.DataStore.isInitialized();
+  }
+
+  // ===== 从存储加载历史错误日志 =====
+  // 优先从 DataStore 读取，其次从 localStorage 读取（向后兼容）
   function _loadLogs() {
+    // 1. 尝试从 DataStore 加载（统一数据层）
+    if (_hasDataStore()) {
+      try {
+        const dsLogs = global.DataStore.get('errorLogs');
+        if (Array.isArray(dsLogs) && dsLogs.length > 0) {
+          _logs = dsLogs.slice();
+          return;
+        }
+      } catch (e) {
+        console.warn('[ErrorReporter] DataStore load failed, falling back to localStorage');
+      }
+    }
+
+    // 2. 从 localStorage 加载（向后兼容）
     try {
       const raw = localStorage.getItem(ERROR_LOG_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           _logs = parsed;
+          // 如果 DataStore 可用，同步过去（延迟同步，不阻塞）
+          if (_hasDataStore()) {
+            try {
+              global.DataStore.set('errorLogs', _logs.slice(), { immediate: false, delay: 1000 });
+            } catch (e2) { /* ignore */ }
+          }
         }
       }
     } catch (e) {
@@ -51,7 +79,7 @@
     }
   }
 
-  // ===== 保存错误日志到 localStorage（惰性/防抖写入） =====
+  // ===== 保存错误日志（惰性/防抖写入） =====
   function _saveLogs() {
     // 防抖：避免短时间内多次错误导致重复写入
     if (_saveTimer) {
@@ -63,13 +91,24 @@
     }, SAVE_DEBOUNCE_MS);
   }
 
-  // ===== 实际执行保存 =====
+  // ===== 实际执行保存（双写：DataStore + localStorage） =====
   function _doSaveLogs() {
     try {
       // 确保不超过上限
       if (_logs.length > MAX_LOGS) {
         _logs = _logs.slice(0, MAX_LOGS);
       }
+
+      // 1. 写入 DataStore（统一数据层，非阻塞）
+      if (_hasDataStore()) {
+        try {
+          global.DataStore.set('errorLogs', _logs.slice(), { immediate: false, delay: 300 });
+        } catch (e) {
+          console.warn('[ErrorReporter] Failed to save to DataStore:', e.message);
+        }
+      }
+
+      // 2. 写入 localStorage（向后兼容，始终保留）
       localStorage.setItem(ERROR_LOG_KEY, JSON.stringify(_logs));
     } catch (e) {
       // 存储失败静默降级（localStorage 可能满或不可用）
@@ -598,7 +637,7 @@
     },
 
     /**
-     * 清空所有错误日志（内存 + localStorage）
+     * 清空所有错误日志（内存 + localStorage + DataStore）
      */
     clearLogs: function() {
       try {
@@ -606,6 +645,10 @@
         localStorage.removeItem(ERROR_LOG_KEY);
         // 同时清理旧 key（向后兼容）
         try { localStorage.removeItem('cagedcipher_error_logs'); } catch (e) { /* ignore */ }
+        // 同步清理 DataStore 中的错误日志
+        if (_hasDataStore()) {
+          try { global.DataStore.set('errorLogs', [], { immediate: true }); } catch (e) { /* ignore */ }
+        }
       } catch (e) { /* ignore */ }
     },
 
