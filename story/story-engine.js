@@ -13,7 +13,7 @@
   const HISTORY_STORAGE_KEY = 'cagedcipher_story_history';
 
   // Character side mapping
-  const CHAR_SIDE = { shenmo: 'left' };
+  const CHAR_SIDE = { shenmo: 'left', cagekeeper: 'left', yingying: 'right', ayan: 'right' };
 
   // Typewriter speed presets (ms per character)
   const TYPING_SPEEDS = {
@@ -215,7 +215,6 @@
       const promise = new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
-          this._imageCache[url] = img;
           resolve(img);
         };
         img.onerror = () => {
