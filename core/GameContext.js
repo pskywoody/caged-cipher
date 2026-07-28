@@ -217,6 +217,15 @@
   global.initGameContext = function(options) {
     const ctx = createGameContext(options);
     global.GameContext = ctx;
+
+    // P3-2: 自动设置 EventLogger 的上下文来源
+    if (global.EventLogger && typeof global.EventLogger.setContextSource === 'function') {
+      global.EventLogger.setContextSource(ctx);
+      if (options && options.logger && typeof options.logger.info === 'function') {
+        options.logger.info('[GameContext] 已注册为 EventLogger 上下文来源');
+      }
+    }
+
     return ctx;
   };
 

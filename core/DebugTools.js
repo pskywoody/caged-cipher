@@ -176,6 +176,67 @@
         ErrorReporter.clearLogs();
         console.log('[Debug] Cleared ' + count + ' error log(s)');
       },
+
+      // 11. P3-2: 玩家画像摘要
+      profile: function() {
+        console.log('=== [Debug] Player Profile ===');
+        try {
+          // 尝试从 ExpertSystem 获取 LearningSystem 实例
+          let learning = null;
+          if (global.ExpertSystem && global.ExpertSystem.learning) {
+            learning = global.ExpertSystem.learning;
+          } else if (global._learningSystemInstance) {
+            learning = global._learningSystemInstance;
+          }
+
+          if (!learning || typeof learning.getProfileSummary !== 'function') {
+            console.log('[Debug] LearningSystem not available, showing basic info');
+
+            // 显示 GameContext 中的基本学习数据
+            const ctx = global.GameContext;
+            if (ctx && ctx.learning) {
+              console.log('  Style:', ctx.learning.style || 'N/A');
+              console.log('  Accuracy Rate:', ctx.learning.accuracyRate != null ?
+                Math.round(ctx.learning.accuracyRate * 100) + '%' : 'N/A');
+              console.log('  Hint Usage Rate:', ctx.learning.hintUsageRate != null ?
+                Math.round(ctx.learning.hintUsageRate * 100) + '%' : 'N/A');
+            } else {
+              console.log('  No learning data available');
+            }
+            return;
+          }
+
+          const summary = learning.getProfileSummary();
+          console.log('  Style:', summary.style,
+            '(confidence:', summary.styleConfidence + ')');
+          console.log('  Accuracy:', summary.accuracyRate);
+          console.log('  Levels Completed:', summary.totalLevelsCompleted);
+          console.log('  Total Play Time:', summary.totalPlayTime);
+          console.log('  Mastered Techniques:', summary.masteredTechniques);
+          console.log('  Top Technique:', summary.topTechnique);
+          console.log('  Achievements Unlocked:', summary.achievementsUnlocked);
+          console.log('  Seals:', summary.seals);
+
+          // 显示技巧掌握度排名前5
+          const ranking = learning.getMasteryRanking();
+          if (ranking.length > 0) {
+            console.log('--- Technique Ranking (Top 5) ---');
+            ranking.slice(0, 5).forEach(function(t, i) {
+              console.log('  ' + (i + 1) + '. ' + t.name +
+                ' - Lv.' + t.level +
+                ' (' + t.usageCount + ' uses, ' + t.proficiency + '%)');
+            });
+          }
+
+          // 返回完整画像对象以便进一步查看
+          console.log('---');
+          console.log('[Debug] Use LearningSystem.getPlayerProfile() for full profile');
+          return learning.getPlayerProfile();
+        } catch (e) {
+          console.warn('[Debug] profile() error:', e);
+          return null;
+        }
+      },
     };
 
     return DEBUG_TOOLS;
