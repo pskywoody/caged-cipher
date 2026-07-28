@@ -391,6 +391,14 @@ class Renderer {
     this._bossBattle = null;
     this._bossBattleActive = false;
 
+    // What-If 假设模式视觉增强
+    this._whatIfMode = false;                    // 是否处于 What-If 模式
+    this._whatIfNumberColor = '#8b5cf6';         // 假设数字颜色（紫罗兰）
+    this._whatIfNumberOpacity = 0.85;            // 假设数字透明度
+    this._whatIfNumberItalic = true;             // 假设数字是否斜体
+    this._whatIfGlowEnabled = true;              // 是否启用假设模式发光效果
+    this._whatIfRootSnapshotCells = null;        // 根快照格子数据（用于判断哪些是假设填入的）
+
     // 机关锁渲染（第1章Boss战）
     this._lockReleases = new Map();  // cageId -> {startTime, phase}
     this._allLocksOpenTime = 0;     // 三锁齐开时间
@@ -457,6 +465,24 @@ class Renderer {
       highlightNumber: true,
       highlightCage: true,
     };
+
+    // ===== P2-3 画质等级 =====
+    // high: 全部特效开启
+    // medium: 关闭粒子、光晕、阴影，动画降为 30fps
+    // low: medium 基础上 + 关闭热力图、连击动画、简化笼子渲染、Canvas 降分辨率
+    this._qualityLevel = 'high';
+    this._qualityTransitioning = false;
+    // 低画质下的 Canvas 分辨率缩放因子（0.7 = 70% 分辨率，CSS 放大显示）
+    this._lowQualityScale = 0.7;
+    this._mediumQualityScale = 1.0;
+    this._canvasQualityScale = 1.0;
+    this._lastQualityScale = 1.0;
+    // 动画帧率控制：每 N 帧渲染一次动画（1=60fps, 2=30fps）
+    this._animationFrameSkip = 1;
+    this._animFrameCounter = 0;
+    // 简化渲染标记（低画质）
+    this._simplifiedCageRendering = false;
+    this._heatmapRenderingSuspended = false;
   }
 
   /**
@@ -474,6 +500,130 @@ class Renderer {
       ...this._highlightOptions,
       ...options,
     };
+  }
+
+  // ===== P2-3 画质等级控制 =====
+
+  /**
+   * 设置画质等级
+   * @param {string} level - 'high' | 'medium' | 'low'
+   * @param {boolean} [smooth=false] - 是否平滑过渡（预留，目前直接切换）
+   */
+  setQualityLevel(level, smooth) {
+    if (['high', 'medium', 'low'].indexOf(level) === -1) return;
+    if (level === this._qualityLevel) return;
+
+    const oldLevel = this._qualityLevel;
+    this._qualityLevel = level;
+
+    // 根据等级开关各项特效
+    switch (level) {
+      case 'high':
+        this._particleEnabled = true;
+        this._comboGlowEnabled = true;
+        this._fillAnimationEnabled = true;
+        this._eraseAnimationEnabled = true;
+        this._candidateAnimationEnabled = true;
+        this._threeActBordersEnabled = true;
+        this._hintAnimState.enabled = true;
+        this._animationFrameSkip = 1; // 60fps
+        this._simplifiedCageRendering = false;
+        // 热力图保持用户设置，不强制开启
+        // Canvas 分辨率恢复
+        this._canvasQualityScale = 1.0;
+        break;
+
+      case 'medium':
+        this._particleEnabled = false;
+        this._comboGlowEnabled = false;
+        this._fillAnimationEnabled = true;   // 保留填数动画
+        this._eraseAnimationEnabled = true;  // 保留擦除动画
+        this._candidateAnimationEnabled = false; // 关闭候选数动画
+        this._threeActBordersEnabled = false;
+        this._hintAnimState.enabled = true;  // 保留提示动画
+        this._animationFrameSkip = 2; // 30fps
+        this._simplifiedCageRendering = false;
+        this._canvasQualityScale = 1.0;
+        // 清除现有粒子
+        if (this._particles && this._particles.length > 0) {
+          this._particles.length = 0;
+        }
+        break;
+
+      case 'low':
+        this._particleEnabled = false;
+        this._comboGlowEnabled = false;
+        this._fillAnimationEnabled = false;  // 关闭填数动画
+        this._eraseAnimationEnabled = false; // 关闭擦除动画
+        this._candidateAnimationEnabled = false;
+        this._threeActBordersEnabled = false;
+        this._hintAnimState.enabled = false; // 关闭提示动画（直接显示结果）
+        this._animationFrameSkip = 2; // 30fps
+        this._simplifiedCageRendering = true;
+        this._canvasQualityScale = this._lowQualityScale;
+        // 清除现有粒子和动画
+        if (this._particles && this._particles.length > 0) {
+          this._particles.length = 0;
+        }
+        if (this._fillAnimations) this._fillAnimations.clear();
+        if (this._eraseAnimations) this._eraseAnimations.clear();
+        if (this._candidateAnimations) this._candidateAnimations.clear();
+        // 强制关闭热力图渲染（但保留用户设置标记，恢复高画质时可重新开启）
+        this._heatmapRenderingSuspended = true;
+        break;
+    }
+
+    // 重置缓存，确保重新渲染
+    this._staticCacheKey = '';
+    this._boardCacheKey = '';
+    this.forceRender = true;
+
+    // 如果有当前 board，立即重渲染
+    if (this._currentBoard) {
+      this.render(this._currentBoard);
+    }
+
+    if (typeof console !== 'undefined' && console.info) {
+      console.info('[Renderer] Quality level changed: ' + oldLevel + ' -> ' + level);
+    }
+  }
+
+  /**
+   * 获取当前画质等级
+   * @returns {string}
+   */
+  getQualityLevel() {
+    return this._qualityLevel;
+  }
+
+  /**
+   * 判断某项特效是否在当前画质下启用
+   * 用于渲染方法中的快速判断
+   * @param {string} feature
+   * @returns {boolean}
+   */
+  _isFeatureEnabled(feature) {
+    const level = this._qualityLevel;
+    switch (feature) {
+      case 'particles':
+        return level === 'high';
+      case 'comboGlow':
+        return level === 'high';
+      case 'shadows':
+        return level === 'high';
+      case 'heatmap':
+        return level !== 'low' || !this._heatmapRenderingSuspended;
+      case 'fillAnimations':
+        return level !== 'low';
+      case 'hintAnimations':
+        return level !== 'low';
+      case 'candidateAnimations':
+        return level === 'high';
+      case 'simplifiedCages':
+        return level === 'low';
+      default:
+        return true;
+    }
   }
 
   // ---------- 三色热力图控制 ----------
@@ -576,15 +726,22 @@ class Renderer {
 
   _updateCanvasSizeRect(canvasW, canvasH) {
     const dpr = window.devicePixelRatio || 1;
-    if (canvasW === this._lastWidth && canvasH === this._lastHeight && dpr === this._dpr) return false;
-    this._lastWidth = canvasW;
-    this._lastHeight = canvasH;
+    // P2-3: 低画质下降低 Canvas 分辨率，用 CSS 缩放显示
+    const qualityScale = this._canvasQualityScale || 1.0;
+    const scaledW = Math.floor(canvasW * qualityScale);
+    const scaledH = Math.floor(canvasH * qualityScale);
+    if (scaledW === this._lastWidth && scaledH === this._lastHeight && dpr === this._dpr
+        && qualityScale === this._lastQualityScale) return false;
+    this._lastWidth = scaledW;
+    this._lastHeight = scaledH;
+    this._lastQualityScale = qualityScale;
     this._dpr = dpr;
-    this.canvas.width = canvasW * dpr;
-    this.canvas.height = canvasH * dpr;
+    this.canvas.width = scaledW * dpr;
+    this.canvas.height = scaledH * dpr;
     this.canvas.style.width = canvasW + 'px';
     this.canvas.style.height = canvasH + 'px';
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // 设置变换：先按质量比例缩放，再按 DPR 缩放
+    this.ctx.setTransform(dpr * qualityScale, 0, 0, dpr * qualityScale, 0, 0);
     // Re-apply opaque background after canvas reset
     this.canvas.style.background = '#f5ede0';
     // 尺寸变化，缓存失效
@@ -1143,6 +1300,85 @@ class Renderer {
   }
 
   /**
+   * P2-3: 低画质简化笼子渲染
+   * - 实线代替虚线
+   * - 不画圆角
+   * - 不画渐变徽章（直接画文字）
+   * - 跳过嵌套深度计算（单层渲染）
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {Object} board
+   * @param {Object} params
+   * @param {Object} theme
+   */
+  _drawCagesSimplified(ctx, board, params, theme) {
+    const { cellSize } = this;
+    const { inset, innerLineWidth, sumFontSize } = params;
+    const cages = board.cages;
+
+    // 简化：所有笼子用统一细实线，不区分内/外层
+    ctx.lineWidth = Math.max(1, innerLineWidth * 0.7);
+    ctx.setLineDash([]); // 实线
+    ctx.strokeStyle = this._hexToRgba(theme.cageDash || '#8b7355', 0.9);
+    ctx.lineCap = 'butt'; // 平头，比 round 快
+
+    for (let i = 0; i < cages.length; i++) {
+      const cage = cages[i];
+      const cellSet = new Set();
+      for (let j = 0; j < cage.cells.length; j++) {
+        cellSet.add(cage.cells[j][0] + ',' + cage.cells[j][1]);
+      }
+
+      for (let j = 0; j < cage.cells.length; j++) {
+        const r = cage.cells[j][0];
+        const c = cage.cells[j][1];
+        const x = c * cellSize;
+        const y = r * cellSize;
+        const inX = x + inset;
+        const inY = y + inset;
+        const inX2 = x + cellSize - inset;
+        const inY2 = y + cellSize - inset;
+
+        ctx.beginPath();
+        // 顶边
+        if (!cellSet.has((r - 1) + ',' + c)) {
+          ctx.moveTo(inX, inY);
+          ctx.lineTo(inX2, inY);
+        }
+        // 底边
+        if (!cellSet.has((r + 1) + ',' + c)) {
+          ctx.moveTo(inX, inY2);
+          ctx.lineTo(inX2, inY2);
+        }
+        // 左边
+        if (!cellSet.has(r + ',' + (c - 1))) {
+          ctx.moveTo(inX, inY);
+          ctx.lineTo(inX, inY2);
+        }
+        // 右边
+        if (!cellSet.has(r + ',' + (c + 1))) {
+          ctx.moveTo(inX2, inY);
+          ctx.lineTo(inX2, inY2);
+        }
+        ctx.stroke();
+      }
+
+      // 简化徽章：直接画数字，无背景圆角矩形
+       if (cage.sum !== undefined && cage.sum !== null) {
+         const firstCell = cage.cells[0];
+         const sumX = firstCell[1] * cellSize + inset + 2;
+         const sumY = firstCell[0] * cellSize + inset + sumFontSize * 0.8;
+         ctx.font = '700 ' + Math.floor(sumFontSize * 0.8) + 'px sans-serif';
+         ctx.fillStyle = theme.cageBadgeText || '#ffffff';
+         // 用描边代替背景色块（更快）
+         ctx.strokeStyle = theme.cageBadgeBg || theme.accent;
+         ctx.lineWidth = 2;
+         ctx.strokeText(String(cage.sum), sumX, sumY);
+         ctx.fillText(String(cage.sum), sumX, sumY);
+       }
+     }
+   }
+
+  /**
    * 绘制笼子的一条边（支持缩进）
    * @param {CanvasRenderingContext2D} ctx
    * @param {string} side - 'top'|'bottom'|'left'|'right'
@@ -1380,81 +1616,86 @@ class Renderer {
       const params = this._getCageScaleParams();
       const { inset, innerLineWidth, sumFontSize } = params;
 
-      // 计算嵌套笼深度（带缓存）
-      const levelIdForCache = board.levelId || this._currentLevelId || 'unknown';
-      const { cageDepths, cageCellSets, maxDepth } = this._computeCageDepths(board.cages, levelIdForCache);
+      // P2-3: 低画质简化渲染路径（无虚线、无圆角、无渐变徽章）
+      if (this._simplifiedCageRendering) {
+        this._drawCagesSimplified(ctx, board, params, theme);
+      } else {
+        // 计算嵌套笼深度（带缓存）
+        const levelIdForCache = board.levelId || this._currentLevelId || 'unknown';
+        const { cageDepths, cageCellSets, maxDepth } = this._computeCageDepths(board.cages, levelIdForCache);
 
-      // ---- 第2层：笼子内框（简洁虚线，缩进2px）----
-      // 从最外层画到最内层
-      for (let depth = 0; depth <= maxDepth; depth++) {
-        const layerCages = board.cages.filter(c => cageDepths.get(c.id) === depth);
-        const isInner = depth > 0;
+        // ---- 第2层：笼子内框（简洁虚线，缩进2px）----
+        // 从最外层画到最内层
+        for (let depth = 0; depth <= maxDepth; depth++) {
+          const layerCages = board.cages.filter(c => cageDepths.get(c.id) === depth);
+          const isInner = depth > 0;
 
-        // 内层笼：细实线 + 强调色；外层笼：细虚线 + 柔和色
-        ctx.lineWidth = isInner ? Math.max(0.8, innerLineWidth * 0.6) : Math.max(1, innerLineWidth * 0.8);
-        ctx.setLineDash(isInner ? [] : [5, 3]);
-        
-        // 统一使用高对比度的淡金色/米色虚线，去除阴影减少视觉噪点
-        ctx.strokeStyle = isInner ? theme.accent : this._hexToRgba(theme.cageDash || '#8b7355', 0.85);
-        ctx.lineCap = 'round';
+          // 内层笼：细实线 + 强调色；外层笼：细虚线 + 柔和色
+          ctx.lineWidth = isInner ? Math.max(0.8, innerLineWidth * 0.6) : Math.max(1, innerLineWidth * 0.8);
+          ctx.setLineDash(isInner ? [] : [5, 3]);
 
-        for (const cage of layerCages) {
-          const cellSet = cageCellSets.get(cage.id);
+          // 统一使用高对比度的淡金色/米色虚线，去除阴影减少视觉噪点
+          ctx.strokeStyle = isInner ? theme.accent : this._hexToRgba(theme.cageDash || '#8b7355', 0.85);
+          ctx.lineCap = 'round';
 
-          for (const [r, c] of cage.cells) {
-            // 顶边
-            if (!cellSet.has(`${r - 1},${c}`)) {
-              this._drawCageEdge(ctx, 'top', r, c, inset);
-            }
-            // 底边
-            if (!cellSet.has(`${r + 1},${c}`)) {
-              this._drawCageEdge(ctx, 'bottom', r, c, inset);
-            }
-            // 左边
-            if (!cellSet.has(`${r},${c - 1}`)) {
-              this._drawCageEdge(ctx, 'left', r, c, inset);
-            }
-            // 右边
-            if (!cellSet.has(`${r},${c + 1}`)) {
-              this._drawCageEdge(ctx, 'right', r, c, inset);
+          for (const cage of layerCages) {
+            const cellSet = cageCellSets.get(cage.id);
+
+            for (const [r, c] of cage.cells) {
+              // 顶边
+              if (!cellSet.has(`${r - 1},${c}`)) {
+                this._drawCageEdge(ctx, 'top', r, c, inset);
+              }
+              // 底边
+              if (!cellSet.has(`${r + 1},${c}`)) {
+                this._drawCageEdge(ctx, 'bottom', r, c, inset);
+              }
+              // 左边
+              if (!cellSet.has(`${r},${c - 1}`)) {
+                this._drawCageEdge(ctx, 'left', r, c, inset);
+              }
+              // 右边
+              if (!cellSet.has(`${r},${c + 1}`)) {
+                this._drawCageEdge(ctx, 'right', r, c, inset);
+              }
             }
           }
         }
-      }
-      
-      // 移动端：重置阴影，避免影响后续绘制
-      const isMobileForReset = document.body && document.body.classList && document.body.classList.contains('layout-mobile');
-      if (isMobileForReset) {
-        ctx.shadowBlur = 0;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-        ctx.shadowColor = 'transparent';
-      }
 
-      // 恢复 lineCap
-      ctx.lineCap = 'butt';
-      ctx.setLineDash([]);
+        // 移动端：重置阴影，避免影响后续绘制
+        const isMobileForReset = document.body && document.body.classList && document.body.classList.contains('layout-mobile');
+        if (isMobileForReset) {
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+          ctx.shadowColor = 'transparent';
+        }
 
-      // ---- 第3层：和值标签徽章 ----
-      // 从最外层画到最内层（内层在上）
-      for (let depth = 0; depth <= maxDepth; depth++) {
-        const layerCages = board.cages.filter(c => cageDepths.get(c.id) === depth);
-        const isInner = depth > 0;
+        // 恢复 lineCap
+        ctx.lineCap = 'butt';
+        ctx.setLineDash([]);
 
-        // 内层笼和值需要向下偏移，避免重叠
-        const depthOffsetY = depth * (sumFontSize * 0.6 + 2);
+        // ---- 第3层：和值标签徽章 ----
+        // 从最外层画到最内层（内层在上）
+        for (let depth = 0; depth <= maxDepth; depth++) {
+          const layerCages = board.cages.filter(c => cageDepths.get(c.id) === depth);
+          const isInner = depth > 0;
 
-        for (const cage of layerCages) {
-          const cellSet = cageCellSets.get(cage.id);
-          // 临时调整 params 的偏移，这里通过保存/恢复坐标系实现
-          ctx.save();
-          ctx.translate(0, depthOffsetY);
-          this._drawCageSumBadge(ctx, cage, cellSet, params, isInner);
-          // 机关锁图标（第1章Boss战）
-          if (this._bossBattleActive && this._bossBattle) {
-            this._drawLockIndicator(ctx, cage, params.cellSize);
+          // 内层笼和值需要向下偏移，避免重叠
+          const depthOffsetY = depth * (sumFontSize * 0.6 + 2);
+
+          for (const cage of layerCages) {
+            const cellSet = cageCellSets.get(cage.id);
+            // 临时调整 params 的偏移，这里通过保存/恢复坐标系实现
+            ctx.save();
+            ctx.translate(0, depthOffsetY);
+            this._drawCageSumBadge(ctx, cage, cellSet, params, isInner);
+            // 机关锁图标（第1章Boss战）
+            if (this._bossBattleActive && this._bossBattle) {
+              this._drawLockIndicator(ctx, cage, params.cellSize);
+            }
+            ctx.restore();
           }
-          ctx.restore();
         }
       }
     }
@@ -1528,6 +1769,84 @@ class Renderer {
     // 主题变化，缓存失效
     this._staticCacheKey = '';
     this._boardCacheKey = '';
+  }
+
+  /**
+   * 设置 What-If 假设模式（P2-2 视觉增强）
+   * @param {boolean} active - 是否激活 What-If 模式
+   * @param {Object} [options] - 可选配置
+   * @param {Array<Array<Object>>} [options.rootCells] - 根快照格子数据，用于判断哪些数字是假设填入的
+   */
+  setWhatIfMode(active, options) {
+    if (this._whatIfMode === active && !options) return;
+    this._whatIfMode = active;
+
+    if (options && options.rootCells) {
+      // 保存根快照数据（深拷贝关键信息）
+      this._whatIfRootSnapshotCells = options.rootCells.map(row =>
+        row.map(cell => ({
+          fillNum: cell.fillNum,
+          fixedNum: cell.fixedNum,
+        }))
+      );
+    } else if (!active) {
+      this._whatIfRootSnapshotCells = null;
+    }
+
+    // 同步 CSS 变量（供 DOM 层使用）
+    this._applyWhatIfCSS();
+
+    // 触发重绘
+    this.forceRender = true;
+  }
+
+  /**
+   * 更新 What-If 根快照数据（当根状态变化时调用）
+   * @param {Array<Array<Object>>} rootCells - 根快照格子数据
+   */
+  updateWhatIfRootSnapshot(rootCells) {
+    if (!this._whatIfMode || !rootCells) return;
+    this._whatIfRootSnapshotCells = rootCells.map(row =>
+      row.map(cell => ({
+        fillNum: cell.fillNum,
+        fixedNum: cell.fixedNum,
+      }))
+    );
+    this.forceRender = true;
+  }
+
+  /**
+   * 检查指定格子的数字是否为假设填入的（即与根快照不同）
+   * @param {number} r - 行号
+   * @param {number} c - 列号
+   * @param {Object} cell - 当前格子数据
+   * @returns {boolean}
+   */
+  _isWhatIfFilledCell(r, c, cell) {
+    if (!this._whatIfMode || !this._whatIfRootSnapshotCells) return false;
+    if (!cell || !cell.fillNum) return false;
+    const rootRow = this._whatIfRootSnapshotCells[r];
+    if (!rootRow) return false;
+    const rootCell = rootRow[c];
+    if (!rootCell) return false;
+    // 如果根快照中该格没有数字但现在有，或者数字不同，则为假设填入的
+    return (rootCell.fillNum || 0) !== cell.fillNum;
+  }
+
+  /**
+   * 应用 What-If 模式相关的 CSS 变量
+   */
+  _applyWhatIfCSS() {
+    const root = document.documentElement;
+    if (!root) return;
+
+    if (this._whatIfMode) {
+      root.style.setProperty('--what-if-number-color', this._whatIfNumberColor);
+      root.style.setProperty('--what-if-number-opacity', this._whatIfNumberOpacity);
+    } else {
+      root.style.removeProperty('--what-if-number-color');
+      root.style.removeProperty('--what-if-number-opacity');
+    }
   }
 
   /**
@@ -2266,7 +2585,15 @@ class Renderer {
       this._animFrameId = requestAnimationFrame(() => {
         this._animFrameId = null;
         if (this._currentBoard) {
-          this.renderImmediate(this._currentBoard);
+          // P2-3: 动画帧率控制（中/低画质降为 30fps）
+          this._animFrameCounter++;
+          if (this._animFrameCounter >= this._animationFrameSkip) {
+            this._animFrameCounter = 0;
+            this.renderImmediate(this._currentBoard);
+          } else {
+            // 跳帧时仍需保持循环运行，继续下一帧
+            this._ensureAnimLoop();
+          }
         }
       });
     }
@@ -3560,8 +3887,11 @@ class Renderer {
     ctx.translate(this.paddingLeft, this.paddingTop);
 
     // ===== 动态层：高亮、选中、玩家数字、笔记等 =====
-    this._drawHeatmap(board);
-    this._drawThreeActBorders(board);
+    // P2-3: 低画质下暂停热力图渲染
+    if (!this._heatmapRenderingSuspended) {
+      this._drawHeatmap(board);
+      this._drawThreeActBorders(board);
+    }
     this._drawHighlightMask(board);
     this._drawRowColBoxHighlight(board);
     this._drawCageHighlight(board);
@@ -4810,13 +5140,24 @@ class Renderer {
         } else if (cell.fixedNum) {
           ctx.font = `700 ${fixedFontSize}px sans-serif`;
           ctx.fillStyle = theme.fixedNum;
+        } else if (this._whatIfMode && this._isWhatIfFilledCell(r, c, cell)) {
+          // What-If 模式：假设填入的数字使用紫蓝色调 + 斜体 + 微发光
+          const italic = this._whatIfNumberItalic ? 'italic' : 'normal';
+          ctx.font = `700 ${italic} ${playerFontSize}px sans-serif`;
+          ctx.fillStyle = this._whatIfNumberColor;
+          ctx.globalAlpha = this._whatIfNumberOpacity;
+          // 轻微发光效果
+          if (this._whatIfGlowEnabled) {
+            ctx.shadowColor = this._whatIfNumberColor;
+            ctx.shadowBlur = 6;
+          }
         } else {
           ctx.font = `700 ${playerFontSize}px sans-serif`;
           ctx.fillStyle = theme.playerNum;
         }
-        ctx.globalAlpha = 1;
         ctx.fillText(num, c * cellSize + cellSize / 2, r * cellSize + cellSize / 2);
         ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
       }
     }
   }
@@ -4900,6 +5241,8 @@ class Renderer {
         // 基础颜色和字体
         let baseColor;
         let fontWeight = '700';
+        let fontStyle = 'normal';
+        let isWhatIfCell = false;
         if (cell.isError && board.settings.conflictRed) {
           baseColor = theme.errorNum;
           fontWeight = '700';
@@ -4907,6 +5250,12 @@ class Renderer {
           // AI填的数字用对手颜色
           baseColor = this._bossBattle.opponent.color || '#ef4444';
           fontWeight = '700';
+        } else if (this._whatIfMode && this._isWhatIfFilledCell(r, c, cell)) {
+          // What-If 模式：假设填入的数字使用紫蓝色调 + 斜体
+          baseColor = this._whatIfNumberColor;
+          fontWeight = '700';
+          fontStyle = this._whatIfNumberItalic ? 'italic' : 'normal';
+          isWhatIfCell = true;
         } else {
           baseColor = theme.playerNum;
         }
@@ -4927,18 +5276,22 @@ class Renderer {
           const flashIntensity = flashProgress * 0.6;
 
           ctx.save();
-          ctx.globalAlpha = alpha;
+          ctx.globalAlpha = isWhatIfCell ? alpha * this._whatIfNumberOpacity : alpha;
           const centerX = c * cellSize + cellSize / 2;
           const centerY = r * cellSize + cellSize / 2;
           ctx.translate(centerX, centerY);
           ctx.scale(scale, scale);
-          ctx.font = `${fontWeight} ${playerFontSize}px sans-serif`;
+          ctx.font = `${fontWeight} ${fontStyle} ${playerFontSize}px sans-serif`;
           ctx.fillStyle = baseColor;
 
-          // 金色光晕（闪光效果）
+          // 金色光晕（闪光效果）—— What-If 模式下使用紫色光晕
           if (flashIntensity > 0) {
-            ctx.shadowColor = `rgba(251, 191, 36, ${flashIntensity})`;
-            ctx.shadowBlur = 12 + flashIntensity * 20;
+            const glowColor = isWhatIfCell ? this._whatIfNumberColor : `rgba(251, 191, 36, ${flashIntensity})`;
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = isWhatIfCell ? 10 + flashIntensity * 15 : 12 + flashIntensity * 20;
+          } else if (isWhatIfCell && this._whatIfGlowEnabled) {
+            ctx.shadowColor = this._whatIfNumberColor;
+            ctx.shadowBlur = 6;
           } else {
             ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
             ctx.shadowBlur = 0;
@@ -4947,12 +5300,23 @@ class Renderer {
           ctx.fillText(cell.fillNum, 0, 0);
           ctx.restore();
         } else {
-          ctx.font = `${fontWeight} ${playerFontSize}px sans-serif`;
+          ctx.font = `${fontWeight} ${fontStyle} ${playerFontSize}px sans-serif`;
           ctx.fillStyle = baseColor;
-          // 文字阴影：深色投影，增强可读性
+          // 文字阴影：深色投影，增强可读性 —— What-If 模式下使用紫色发光
           ctx.save();
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
-          ctx.shadowBlur = 0;
+          if (isWhatIfCell) {
+            ctx.globalAlpha = this._whatIfNumberOpacity;
+            if (this._whatIfGlowEnabled) {
+              ctx.shadowColor = this._whatIfNumberColor;
+              ctx.shadowBlur = 6;
+            } else {
+              ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+              ctx.shadowBlur = 0;
+            }
+          } else {
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+            ctx.shadowBlur = 0;
+          }
           ctx.shadowOffsetY = 0;
           ctx.fillText(cell.fillNum, c * cellSize + cellSize / 2, r * cellSize + cellSize / 2);
           ctx.restore();

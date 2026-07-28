@@ -212,15 +212,36 @@
         ctx.font = `600 ${Math.floor(cellSize * 0.6)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        // P2-2: 根据快照索引调整玩家数字的紫色调（越新越浓）
+        const purpleTint = Math.min(index, 2) * 0.15; // 0, 0.15, 0.30
         for (let r = 0; r < this.board.size; r++) {
           for (let c = 0; c < this.board.size; c++) {
             const cell = snapshot.cells[r][c];
             const num = cell.fillNum || cell.fixedNum;
             if (num > 0) {
-              ctx.fillStyle = cell.fixedNum ? '#e8eaed' : '#60a5fa';
+              if (cell.fixedNum) {
+                ctx.fillStyle = '#e8eaed';
+              } else {
+                // 玩家数字：从蓝色渐变到紫色
+                if (purpleTint > 0) {
+                  // 颜色插值：#60a5fa -> #8b5cf6
+                  const rCol = Math.round(96 + (139 - 96) * purpleTint / 0.3);
+                  const gCol = Math.round(165 + (92 - 165) * purpleTint / 0.3);
+                  const bCol = Math.round(250 + (246 - 250) * purpleTint / 0.3);
+                  ctx.fillStyle = `rgb(${rCol}, ${gCol}, ${bCol})`;
+                } else {
+                  ctx.fillStyle = '#60a5fa';
+                }
+              }
               ctx.fillText(String(num), c * cellSize + cellSize / 2, r * cellSize + cellSize / 2);
             }
           }
+        }
+
+        // P2-2: 紫色调叠层（越新的快照越浓）
+        if (purpleTint > 0) {
+          ctx.fillStyle = `rgba(139, 92, 246, ${purpleTint * 0.2})`;
+          ctx.fillRect(0, 0, offscreen.width, offscreen.height);
         }
 
         return offscreen.toDataURL();
@@ -247,6 +268,14 @@
           card.classList.add('active');
         } else if (index === this.currentIndex) {
           card.classList.add('active');
+        }
+        // P2-2: 不同快照的紫色调渐变（第1个最淡，越新越浓）
+        if (index === 0) {
+          card.classList.add('whatif-snapshot-1');
+        } else if (index === 1) {
+          card.classList.add('whatif-snapshot-2');
+        } else if (index >= 2) {
+          card.classList.add('whatif-snapshot-3');
         }
 
         // 缩略图
@@ -325,6 +354,14 @@
         } else if (index === this.currentIndex) {
           card.classList.add('active');
         }
+        // P2-2: 不同快照的紫色调渐变（第1个最淡，越新越浓）
+        if (index === 0) {
+          card.classList.add('whatif-snapshot-1');
+        } else if (index === 1) {
+          card.classList.add('whatif-snapshot-2');
+        } else if (index >= 2) {
+          card.classList.add('whatif-snapshot-3');
+        }
 
         // 缩略图
         if (snap.thumbnail) {
@@ -401,6 +438,19 @@
       // 添加视觉标记
       document.body.classList.add('whatif-mode');
 
+      // 通知渲染器进入 What-If 模式（数字异色等视觉增强）
+      if (this.renderer && typeof this.renderer.setWhatIfMode === 'function') {
+        this.renderer.setWhatIfMode(true, {
+          rootCells: this.rootSnapshot ? this.rootSnapshot.cells : null,
+        });
+      }
+
+      // 创建棋盘淡紫色叠层
+      this._createWhatIfOverlay();
+
+      // 创建假设模式徽章
+      this._createWhatIfBadge();
+
       // 显示右侧浮条（拉扣头 + 快照面板）
       const stack = document.getElementById('whatif-snapshot-stack');
       const hintProg = document.getElementById('hint-progress-indicator');
@@ -476,6 +526,15 @@
 
       // 移除视觉标记
       document.body.classList.remove('whatif-mode');
+
+      // 通知渲染器退出 What-If 模式
+      if (this.renderer && typeof this.renderer.setWhatIfMode === 'function') {
+        this.renderer.setWhatIfMode(false);
+      }
+
+      // 移除叠层和徽章
+      this._removeWhatIfOverlay();
+      this._removeWhatIfBadge();
 
       // 恢复关卡名
       const titleEl = document.getElementById('level-title');
@@ -711,6 +770,107 @@
         icon.textContent = '🧪';
       } else {
         icon.textContent = '💡';
+      }
+    }
+
+    // === What-If 模式视觉增强（P2-2） ===
+
+    /**
+     * 创建棋盘淡紫色叠层
+     */
+    _createWhatIfOverlay() {
+      // 移动端棋盘区域
+      const boardArea = document.getElementById('board-area');
+      if (boardArea && !boardArea.querySelector('.whatif-overlay')) {
+        const overlay = document.createElement('div');
+        overlay.className = 'whatif-overlay';
+        overlay.id = 'whatif-overlay-mobile';
+        boardArea.appendChild(overlay);
+      }
+      // PC 端棋盘容器
+      const pcBoardContainer = document.getElementById('pc-board-container');
+      if (pcBoardContainer && !pcBoardContainer.querySelector('.whatif-overlay')) {
+        const overlay = document.createElement('div');
+        overlay.className = 'whatif-overlay';
+        overlay.id = 'whatif-overlay-pc';
+        pcBoardContainer.appendChild(overlay);
+      }
+    }
+
+    /**
+     * 移除棋盘淡紫色叠层
+     */
+    _removeWhatIfOverlay() {
+      const mobileOverlay = document.getElementById('whatif-overlay-mobile');
+      if (mobileOverlay && mobileOverlay.parentNode) {
+        mobileOverlay.parentNode.removeChild(mobileOverlay);
+      }
+      const pcOverlay = document.getElementById('whatif-overlay-pc');
+      if (pcOverlay && pcOverlay.parentNode) {
+        pcOverlay.parentNode.removeChild(pcOverlay);
+      }
+    }
+
+    /**
+     * 创建假设模式徽章（带脉冲动画，点击可快速退出）
+     */
+    _createWhatIfBadge() {
+      // 移动端棋盘区域
+      const boardArea = document.getElementById('board-area');
+      if (boardArea && !boardArea.querySelector('.whatif-badge')) {
+        const badge = this._buildWhatIfBadge('whatif-badge-mobile');
+        boardArea.appendChild(badge);
+      }
+      // PC 端棋盘容器
+      const pcBoardContainer = document.getElementById('pc-board-container');
+      if (pcBoardContainer && !pcBoardContainer.querySelector('.whatif-badge')) {
+        const badge = this._buildWhatIfBadge('whatif-badge-pc');
+        pcBoardContainer.appendChild(badge);
+      }
+    }
+
+    /**
+     * 构建单个徽章元素
+     */
+    _buildWhatIfBadge(id) {
+      const badge = document.createElement('div');
+      badge.className = 'whatif-badge';
+      badge.id = id;
+      badge.title = '点击退出假设模式';
+
+      const icon = document.createElement('span');
+      icon.className = 'whatif-badge-icon';
+      icon.textContent = '🧪';
+      badge.appendChild(icon);
+
+      const text = document.createElement('span');
+      text.className = 'whatif-badge-text';
+      text.textContent = '假设模式';
+      badge.appendChild(text);
+
+      // 点击退出假设模式
+      badge.addEventListener('click', () => {
+        if (this.AudioService && this.AudioService.sfx) {
+          this.AudioService.sfx.play?.('click');
+        }
+        this.exitMode(false);
+        this.onShowToast('已退出假设模式，更改已撤销');
+      });
+
+      return badge;
+    }
+
+    /**
+     * 移除假设模式徽章
+     */
+    _removeWhatIfBadge() {
+      const mobileBadge = document.getElementById('whatif-badge-mobile');
+      if (mobileBadge && mobileBadge.parentNode) {
+        mobileBadge.parentNode.removeChild(mobileBadge);
+      }
+      const pcBadge = document.getElementById('whatif-badge-pc');
+      if (pcBadge && pcBadge.parentNode) {
+        pcBadge.parentNode.removeChild(pcBadge);
       }
     }
 

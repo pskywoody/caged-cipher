@@ -336,3 +336,131 @@ body {
   opacity: 1;
   pointer-events: auto;
 }
+
+/* ============================================
+   What-If 假设模式视觉增强（P2-2）
+   ============================================ */
+
+/* What-If 模式 CSS 变量（可通过 JS 动态覆盖，支持主题切换） */
+:root {
+  --what-if-number-color: #8b5cf6;        /* 紫罗兰色 - 假设数字颜色 */
+  --what-if-number-opacity: 0.85;         /* 假设数字微透明 */
+  --what-if-number-font-style: italic;    /* 假设数字斜体 */
+  --what-if-overlay-tint: rgba(139, 92, 246, 0.05);  /* 整体微紫叠层 */
+  --what-if-border-glow: 0 0 8px rgba(139, 92, 246, 0.3);  /* 边框发光 */
+  --what-if-border-glow-strong: 0 0 16px rgba(139, 92, 246, 0.5);  /* 强发光 */
+  --what-if-badge-bg: rgba(139, 92, 246, 0.9);  /* 徽章背景 */
+  --what-if-badge-text: #ffffff;          /* 徽章文字 */
+  --what-if-snapshot-tint: rgba(139, 92, 246, 0.15);  /* 快照紫色调 */
+}
+
+/* 棋盘叠层容器（用于 What-If 模式淡紫色覆盖） */
+#board-area,
+#pc-board-container {
+  position: relative;
+}
+
+/* What-If 模式棋盘淡紫色叠层 */
+.whatif-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--what-if-overlay-tint);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 250ms ease-in-out;
+  z-index: var(--z-board-overlay, 20);
+  border-radius: var(--radius-lg);
+}
+
+.whatif-mode .whatif-overlay {
+  opacity: 1;
+}
+
+/* What-If 模式指示器徽章 */
+.whatif-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 4px 10px;
+  background: var(--what-if-badge-bg);
+  color: var(--what-if-badge-text);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 12px;
+  z-index: calc(var(--z-board-overlay, 20) + 1);
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.9);
+  transition: opacity 250ms ease-out, transform 250ms ease-out;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.whatif-mode .whatif-badge {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  animation: whatif-badge-pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes whatif-badge-pulse {
+  0%, 100% {
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 2px 16px rgba(139, 92, 246, 0.7),
+                0 0 0 2px rgba(139, 92, 246, 0.2);
+  }
+}
+
+.whatif-badge:hover {
+  transform: scale(1.05) !important;
+  animation-play-state: paused;
+}
+
+.whatif-badge:active {
+  transform: scale(0.95) !important;
+}
+
+.whatif-badge-icon {
+  font-size: 12px;
+}
+
+.whatif-badge-text {
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+
+/* What-If 模式下快照卡片紫色调渐变 */
+.snapshot-card.whatif-snapshot-1 {
+  filter: hue-rotate(20deg) saturate(1.1);
+}
+
+.snapshot-card.whatif-snapshot-2 {
+  filter: hue-rotate(35deg) saturate(1.2);
+}
+
+.snapshot-card.whatif-snapshot-3 {
+  filter: hue-rotate(50deg) saturate(1.3);
+}
+
+/* What-If 模式下选中格子发光效果（通过 Canvas 内实现，此处保留 CSS 备用） */
+.whatif-mode #gameCanvas {
+  transition: box-shadow 250ms ease-out;
+}
+
+/* What-If 模式按钮激活态增强 */
+#btn-whatif.active,
+#pc-btn-whatif.active {
+  background: linear-gradient(135deg, #8b5cf6, #7c3aed) !important;
+  color: #ffffff !important;
+  border-color: #a78bfa !important;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.5) !important;
+}
