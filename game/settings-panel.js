@@ -248,6 +248,215 @@ class SettingsPanel {
     this._applyAll();
     this._updateUI();
     this.save();
+    // 显示 Toast 提示
+    this._showToast('设置已重置为默认值', 'success');
+  }
+
+  /**
+   * 确认重置设置（使用自定义对话框）
+   */
+  _confirmResetSettings() {
+    this._showConfirmDialog({
+      title: '重置所有设置？',
+      message: '将重置音量、画质、游戏开关等所有设置为默认值。\n\n不会影响关卡进度和成就。',
+      confirmText: '确认重置',
+      cancelText: '取消',
+      type: 'danger',
+      onConfirm: () => {
+        this.resetSettings();
+        if (typeof AudioService !== 'undefined') AudioService.sfx.play('success');
+      },
+    });
+  }
+
+  /**
+   * 显示 Toast 提示
+   * @param {string} message - 提示消息
+   * @param {string} [type='info'] - 类型: info | success | warning | error
+   */
+  _showToast(message, type) {
+    try {
+      type = type || 'info';
+      const colorMap = {
+        info: { border: '#6366f1', text: '#a5b4fc', bgFrom: '#1e1b4b', bgTo: '#0f0d24', icon: 'ℹ️' },
+        success: { border: '#22c55e', text: '#86efac', bgFrom: '#052e16', bgTo: '#02140a', icon: '✅' },
+        warning: { border: '#f59e0b', text: '#fcd34d', bgFrom: '#292524', bgTo: '#1c1917', icon: '⚠️' },
+        error: { border: '#ef4444', text: '#fca5a5', bgFrom: '#2d1f1f', bgTo: '#1a1212', icon: '❌' },
+      };
+      const colors = colorMap[type] || colorMap.info;
+
+      const toast = document.createElement('div');
+      toast.style.cssText =
+        'position:fixed;top:20%;left:50%;' +
+        'transform:translate(-50%,-50%) scale(0.9);' +
+        'background:linear-gradient(180deg, ' + colors.bgFrom + ' 0%, ' + colors.bgTo + ' 100%);' +
+        'border:1px solid ' + colors.border + ';' +
+        'border-radius:10px;padding:12px 24px;' +
+        'text-align:center;z-index:25000;opacity:0;' +
+        'transition:opacity 0.3s, transform 0.3s;' +
+        'box-shadow:0 8px 32px rgba(0,0,0,0.5);' +
+        'font-size:13px;color:' + colors.text + ';' +
+        'font-weight:500;pointer-events:none;' +
+        'max-width:80vw;';
+      toast.innerHTML =
+        '<span style="margin-right:8px;">' + colors.icon + '</span>' +
+        '<span>' + message + '</span>';
+      document.body.appendChild(toast);
+      requestAnimationFrame(function() {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translate(-50%, 0) scale(1)';
+      });
+      setTimeout(function() {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translate(-50%, -10px) scale(0.95)';
+        setTimeout(function() { if (toast.parentNode) toast.remove(); }, 300);
+      }, 2000);
+    } catch (e) {
+      // 静默处理
+    }
+  }
+
+  /**
+   * 显示自定义确认对话框
+   * @param {Object} options - 配置
+   * @param {string} options.title - 标题
+   * @param {string} options.message - 消息（支持换行）
+   * @param {string} [options.confirmText='确定'] - 确认按钮文字
+   * @param {string} [options.cancelText='取消'] - 取消按钮文字
+   * @param {string} [options.type='warning'] - 类型: warning | danger | info
+   * @param {Function} options.onConfirm - 确认回调
+   * @param {Function} [options.onCancel] - 取消回调
+   */
+  _showConfirmDialog(options) {
+    const {
+      title,
+      message,
+      confirmText = '确定',
+      cancelText = '取消',
+      type = 'warning',
+      onConfirm,
+      onCancel,
+    } = options;
+
+    const typeStyles = {
+      warning: { icon: '⚠️', accent: '#f59e0b', confirmBg: '#f59e0b' },
+      danger: { icon: '🗑️', accent: '#ef4444', confirmBg: '#ef4444' },
+      info: { icon: 'ℹ️', accent: '#6366f1', confirmBg: '#6366f1' },
+    };
+    const style = typeStyles[type] || typeStyles.warning;
+
+    // 遮罩层
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 30000;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity 0.2s;
+      backdrop-filter: blur(4px);
+    `;
+
+    // 对话框
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      background: linear-gradient(180deg, #1a1d24 0%, #0f1115 100%);
+      border: 1px solid #2a2f3a;
+      border-radius: 16px;
+      padding: 24px;
+      max-width: 340px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+      transform: scale(0.9);
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    `;
+
+    const messageLines = message.split('\n').map(line =>
+      `<div style="margin-bottom: 6px;">${line}</div>`
+    ).join('');
+
+    dialog.innerHTML = `
+      <div style="text-align: center; margin-bottom: 16px;">
+        <span style="font-size: 36px;">${style.icon}</span>
+      </div>
+      <div style="font-size: 16px; font-weight: 700; color: #e8eaed; text-align: center; margin-bottom: 12px;">
+        ${title}
+      </div>
+      <div style="font-size: 13px; color: #94a3b8; line-height: 1.6; text-align: center; margin-bottom: 20px;">
+        ${messageLines}
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="confirm-cancel-btn" data-action="cancel" style="
+          flex: 1;
+          padding: 10px 16px;
+          background: rgba(42, 47, 58, 0.5);
+          border: 1px solid #2a2f3a;
+          color: #94a3b8;
+          border-radius: 10px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          transition: all 0.15s;
+        ">${cancelText}</button>
+        <button class="confirm-cancel-btn" data-action="confirm" style="
+          flex: 1;
+          padding: 10px 16px;
+          background: ${style.confirmBg};
+          border: 1px solid ${style.confirmBg};
+          color: #fff;
+          border-radius: 10px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 600;
+          transition: all 0.15s;
+        ">${confirmText}</button>
+      </div>
+    `;
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    const closeDialog = (confirmed) => {
+      overlay.style.opacity = '0';
+      dialog.style.transform = 'scale(0.9)';
+      setTimeout(() => {
+        if (overlay.parentNode) overlay.remove();
+        if (confirmed) {
+          if (onConfirm) onConfirm();
+        } else {
+          if (onCancel) onCancel();
+        }
+      }, 200);
+    };
+
+    // 按钮事件
+    dialog.querySelectorAll('.confirm-cancel-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (typeof AudioService !== 'undefined') AudioService.sfx.play('click');
+        closeDialog(btn.dataset.action === 'confirm');
+      });
+    });
+
+    // 点击遮罩取消
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closeDialog(false);
+      }
+    });
+
+    // ESC 键取消
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        document.removeEventListener('keydown', escHandler);
+        closeDialog(false);
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+
+    // 入场动画
+    requestAnimationFrame(() => {
+      overlay.style.opacity = '1';
+      dialog.style.transform = 'scale(1)';
+    });
   }
 
   setBoard(board) {
@@ -866,6 +1075,39 @@ class SettingsPanel {
           </div>
         </div>
 
+        <!-- 底部操作区：重置所有设置（醒目按钮） -->
+        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #1e222a;">
+          <button class="settings-btn settings-btn-reset-all-settings" style="
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            color: #f87171;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+          ">
+            <span>🔄</span>
+            <span>重置所有设置</span>
+          </button>
+          <div style="
+            font-size: 11px;
+            color: #64748b;
+            text-align: center;
+            margin-top: 8px;
+            line-height: 1.4;
+          ">
+            仅重置音量、画质、游戏开关等设置<br/>
+            不会影响关卡进度和成就
+          </div>
+        </div>
+
         <div style="height: 8px;"></div>
       </div>
     `;
@@ -933,6 +1175,15 @@ class SettingsPanel {
       #${this.panelId} .settings-btn-reset-all:hover {
         background: rgba(248, 113, 113, 0.2);
         border-color: rgba(248, 113, 113, 0.5);
+      }
+      #${this.panelId} .settings-btn-reset-all-settings:hover {
+        background: rgba(239, 68, 68, 0.2);
+        border-color: rgba(239, 68, 68, 0.6);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+      }
+      #${this.panelId} .settings-btn-reset-all-settings:active {
+        transform: translateY(0);
       }
       #${this.panelId} .settings-btn-reset-settings:hover {
         background: rgba(100, 116, 139, 0.2);
@@ -1042,13 +1293,16 @@ class SettingsPanel {
       if (typeof AudioService !== 'undefined') AudioService.sfx.play('click');
     });
 
-    // 重置设置
+    // 重置设置（高级设置区内的按钮）
     this.el.querySelector('.settings-btn-reset-settings').addEventListener('click', () => {
       if (typeof AudioService !== 'undefined') AudioService.sfx.play('click');
-      if (confirm('确定要重置所有设置为默认值吗？')) {
-        this.resetSettings();
-        if (typeof AudioService !== 'undefined') AudioService.sfx.play('success');
-      }
+      this._confirmResetSettings();
+    });
+
+    // 重置所有设置（底部醒目按钮）
+    this.el.querySelector('.settings-btn-reset-all-settings').addEventListener('click', () => {
+      if (typeof AudioService !== 'undefined') AudioService.sfx.play('click');
+      this._confirmResetSettings();
     });
 
     // 重置所有进度

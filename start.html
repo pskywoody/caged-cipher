@@ -15,6 +15,109 @@
     base-uri 'self';
   ">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <!-- 全局错误边界（必须放在所有脚本之前） -->
+  <script>
+  (function() {
+    'use strict';
+
+    // 标记：是否已经显示过致命错误（防止重复刷屏）
+    var _fatalErrorShown = false;
+
+    // 致命错误降级 UI
+    function showFatalError(msg, error) {
+      if (_fatalErrorShown) return;
+      _fatalErrorShown = true;
+
+      try {
+        var container = document.getElementById('game-container')
+                      || document.getElementById('app')
+                      || document.body;
+
+        // 收集错误信息
+        var errorInfo = {
+          message: msg,
+          url: (error && error.fileName) || (window.location && window.location.href),
+          line: (error && error.lineNumber) || 'unknown',
+          stack: (error && error.stack) || 'no stack',
+          time: new Date().toISOString()
+        };
+
+        // 尝试保存错误信息到 localStorage
+        try {
+          var logs = JSON.parse(localStorage.getItem('caged_cipher_fatal_errors') || '[]');
+          logs.unshift(errorInfo);
+          logs = logs.slice(0, 5); // 最多存 5 条
+          localStorage.setItem('caged_cipher_fatal_errors', JSON.stringify(logs));
+        } catch(e) {}
+
+        // 显示友好的错误界面（侦探案卷风格）
+        container.innerHTML =
+          '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;' +
+          'background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);padding:20px;">' +
+            '<div style="max-width:400px;width:100%;background:#1e293b;border:2px solid #fbbf24;' +
+            'border-radius:12px;padding:32px 24px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">' +
+              '<div style="font-size:56px;margin-bottom:16px;">🕵️</div>' +
+              '<div style="font-size:20px;font-weight:700;color:#fbbf24;margin-bottom:8px;">案卷损坏</div>' +
+              '<div style="font-size:14px;color:#94a3b8;margin-bottom:24px;line-height:1.6;">' +
+                '侦探先生，系统遇到了一个小问题。<br>请尝试重新加载页面。' +
+              '</div>' +
+              '<button onclick="location.reload()" style="padding:12px 32px;background:#fbbf24;color:#0f172a;' +
+              'border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;' +
+              'transition:transform 0.1s;" onmousedown="this.style.transform=\'scale(0.97)\'" ' +
+              'onmouseup="this.style.transform=\'scale(1)\'">重新加载</button>' +
+              '<div style="margin-top:20px;font-size:12px;color:#475569;word-break:break-all;' +
+              'text-align:left;background:#0f172a;padding:12px;border-radius:6px;max-height:120px;overflow:auto;">' +
+                '<div style="color:#64748b;margin-bottom:4px;">错误信息：</div>' +
+                msg + ' (line ' + errorInfo.line + ')' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+      } catch(e) {
+        // 连错误 UI 都渲染失败了，只能 alert
+        try { alert('系统出错了，请刷新页面。\n' + msg); } catch(e2) {}
+      }
+    }
+
+    // JS 运行时错误
+    window.onerror = function(msg, url, line, col, error) {
+      console.error('[FATAL ERROR]', msg, 'at', url, ':', line, ':', col);
+      if (error && error.stack) console.error(error.stack);
+
+      // 只在主页面显示致命错误UI
+      // 某些非致命错误（如资源加载失败）不触发
+      showFatalError(msg, error);
+      return true; // 阻止默认错误处理
+    };
+
+    // 未处理的 Promise 错误
+    window.addEventListener('unhandledrejection', function(e) {
+      console.warn('[UNHANDLED REJECTION]', e.reason);
+      // Promise 错误不显示致命错误 UI（降级处理，只记录）
+      // 因为很多 Promise 错误可能是网络问题，不影响主流程
+      try {
+        var logs = JSON.parse(localStorage.getItem('caged_cipher_fatal_errors') || '[]');
+        logs.unshift({
+          type: 'unhandledrejection',
+          message: (e.reason && e.reason.message) || String(e.reason),
+          stack: (e.reason && e.reason.stack) || '',
+          time: new Date().toISOString()
+        });
+        logs = logs.slice(0, 5);
+        localStorage.setItem('caged_cipher_fatal_errors', JSON.stringify(logs));
+      } catch(err) {}
+    });
+
+    // 资源加载失败（图片/脚本/样式等）
+    window.addEventListener('error', function(e) {
+      if (e.target !== window && e.target !== document) {
+        console.warn('[RESOURCE ERROR] 资源加载失败:',
+          e.target && e.target.src ? e.target.src :
+          e.target && e.target.href ? e.target.href : 'unknown');
+      }
+    }, true); // 捕获阶段才能拿到资源错误
+
+  })();
+  </script>
   <title>Caged Cipher · 笼中密码</title>
   <link rel="stylesheet" href="assets/css/style.css">
   <style>

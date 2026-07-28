@@ -73,6 +73,21 @@
      * @returns {Object} 更新后的风格 { value, confidence }
      */
     updateStyleFromContext() {
+      // 使用 SafeCall 包裹风格计算，防止学习层异常导致游戏崩溃
+      const safeCall = global.SafeCall;
+      if (safeCall && typeof safeCall.callWithTimeout === 'function') {
+        const result = safeCall.callWithTimeout(
+          () => this._doUpdateStyleFromContext(),
+          this.getStyle(),
+          200,
+          { label: 'LearningSystem.updateStyleFromContext' }
+        );
+        return result;
+      }
+      return this._doUpdateStyleFromContext();
+    }
+
+    _doUpdateStyleFromContext() {
       try {
         const ctx = global.GameContext;
         if (!ctx || !ctx.player) {

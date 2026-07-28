@@ -35,8 +35,30 @@
 
       log.info('Guide mode starting...');
 
-      // Init audio
-      AudioService.init();
+      // ============================================================
+      //  P0 加固：每个模块独立 try-catch + 降级空实现
+      //  确保单个模块失败不会导致整个应用崩溃
+      // ============================================================
+
+      // --- 1. AudioService 音频服务 ---
+      try {
+        if (typeof AudioService !== 'undefined' && AudioService.init) {
+          AudioService.init();
+        } else {
+          throw new Error('AudioService not available');
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] AudioService 初始化失败，使用空实现降级', e);
+        // 降级空实现
+        global.AudioService = {
+          sfx: { play: function(){} },
+          bgm: { play: function(){}, stop: function(){} },
+          voice: { play: function(){} },
+          duck: function(){},
+          unlock: function(){},
+          init: function(){},
+        };
+      }
 
       // 页面进入动画
       requestAnimationFrame(() => {
@@ -45,7 +67,7 @@
           if (root) {
             root.classList.add('page-enter-active');
             try {
-              if (AudioService.sfx) AudioService.sfx.play('book_open', { volume: 0.5 });
+              if (AudioService && AudioService.sfx) AudioService.sfx.play('book_open', { volume: 0.5 });
             } catch(e) {}
             setTimeout(() => {
               root.classList.remove('page-enter', 'page-enter-active');
@@ -54,106 +76,245 @@
         });
       });
 
-      // Init settings panel
-      if (typeof SettingsPanel !== 'undefined') {
-        ctx.settingsPanel = new SettingsPanel({
-          onResetProgress: () => {
-            if (global.ProgressManager) ProgressManager.reset();
-          },
-        });
-        ctx.settingsPanel.load();
+      // --- 2. SettingsPanel 设置面板 ---
+      try {
+        if (typeof SettingsPanel !== 'undefined') {
+          ctx.settingsPanel = new SettingsPanel({
+            onResetProgress: () => {
+              if (global.ProgressManager) ProgressManager.reset();
+            },
+          });
+          ctx.settingsPanel.load();
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] SettingsPanel 初始化失败，降级', e);
+        ctx.settingsPanel = {
+          get: function() { return null; },
+          set: function() {},
+          load: function() {},
+        };
       }
 
-      // P2-3: 初始化性能监控（FPS 检测 + 自动画质降级）
-      if (typeof PerformanceMonitor !== 'undefined') {
-        PerformanceMonitor.onQualityChange((newLevel, oldLevel, reason) => {
-          // 当 renderer 存在时，同步画质等级
-          if (ctx.renderer && typeof ctx.renderer.setQualityLevel === 'function') {
-            ctx.renderer.setQualityLevel(newLevel);
-          }
-          // 更新 body 上的画质类，供 CSS 使用
-          if (document.body) {
-            document.body.classList.remove('quality-high', 'quality-medium', 'quality-low');
-            document.body.classList.add('quality-' + newLevel);
-          }
-          log.info('[Performance] Quality: ' + oldLevel + ' -> ' + newLevel +
-                   ' (' + reason + ', avgFps: ' + PerformanceMonitor.avgFps + ')');
-        });
+      // --- 3. PerformanceMonitor 性能监控 ---
+      try {
+        if (typeof PerformanceMonitor !== 'undefined') {
+          PerformanceMonitor.onQualityChange((newLevel, oldLevel, reason) => {
+            // 当 renderer 存在时，同步画质等级
+            if (ctx.renderer && typeof ctx.renderer.setQualityLevel === 'function') {
+              ctx.renderer.setQualityLevel(newLevel);
+            }
+            // 更新 body 上的画质类，供 CSS 使用
+            if (document.body) {
+              document.body.classList.remove('quality-high', 'quality-medium', 'quality-low');
+              document.body.classList.add('quality-' + newLevel);
+            }
+            log.info('[Performance] Quality: ' + oldLevel + ' -> ' + newLevel +
+                     ' (' + reason + ', avgFps: ' + PerformanceMonitor.avgFps + ')');
+          });
 
-        // 启动性能监控（首次检测会在后台进行）
-        PerformanceMonitor.start();
+          // 启动性能监控（首次检测会在后台进行）
+          PerformanceMonitor.start();
 
-        // 如果 settings panel 已经加载了画质设置，应用它
-        if (ctx.settingsPanel && ctx.settingsPanel.get) {
-          const savedQuality = ctx.settingsPanel.get('display.quality');
-          if (savedQuality && savedQuality !== 'auto') {
-            PerformanceMonitor.setQualityLevel(savedQuality);
+          // 如果 settings panel 已经加载了画质设置，应用它
+          if (ctx.settingsPanel && ctx.settingsPanel.get) {
+            const savedQuality = ctx.settingsPanel.get('display.quality');
+            if (savedQuality && savedQuality !== 'auto') {
+              PerformanceMonitor.setQualityLevel(savedQuality);
+            }
           }
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] PerformanceMonitor 初始化失败，降级', e);
+        // 降级：提供 getQualityLevel 空实现
+        if (typeof PerformanceMonitor === 'undefined') {
+          global.PerformanceMonitor = {
+            start: function(){},
+            onQualityChange: function(){},
+            setQualityLevel: function(){},
+            getQualityLevel: function() { return 'high'; },
+            avgFps: 60,
+          };
         }
       }
 
-      // GameContext 中央状态
-      if (typeof initGameContext === 'function') {
-        initGameContext({ logger: log });
+      // --- 4. GameContext 中央状态 ---
+      try {
+        if (typeof initGameContext === 'function') {
+          initGameContext({ logger: log });
+        } else {
+          throw new Error('initGameContext function not found');
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] GameContext 初始化失败，使用空实现降级', e);
+        // 降级空实现
+        if (!global.GameContext) {
+          global.GameContext = {
+            player: {},
+            level: {},
+            decision: {},
+            learning: {},
+            isInCooldown: function() { return false; },
+            setCooldown: function() {},
+            updatePlayer: function() {},
+            updateLevel: function() {},
+          };
+        }
       }
 
-      // Init expert system
-      ctx.expertSystem = new ExpertSystem();
-      ctx.expertSystem.init({
-        thresholds: { stuckMs: 45000 },
-        onFeedback: (msg, level) => ctx.showToast(msg),
-      });
-      global.ExpertSystem = ctx.expertSystem;
+      // --- 5. ExpertSystem 专家系统 ---
+      try {
+        if (typeof ExpertSystem !== 'undefined') {
+          ctx.expertSystem = new ExpertSystem();
+          ctx.expertSystem.init({
+            thresholds: { stuckMs: 45000 },
+            onFeedback: (msg, level) => ctx.showToast(msg),
+          });
+          global.ExpertSystem = ctx.expertSystem;
+        } else {
+          throw new Error('ExpertSystem class not found');
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] ExpertSystem 初始化失败，使用空实现降级', e);
+        ctx.expertSystem = {
+          onFillCorrect: function(){},
+          onFillWrong: function(){},
+          onNote: function(){},
+          onHint: function(){},
+          decide: function() { return []; },
+          evaluateFromContext: function() { return []; },
+          init: function(){},
+          setGridSize: function(){},
+        };
+        global.ExpertSystem = ctx.expertSystem;
+      }
 
-      // Register character-based feedback handlers
-      ExpertCharacterHandler.init({
-        getExpertSystem: () => ctx.expertSystem,
-        showCharacterBubble: ctx.showCharacterBubble,
-        showToast: ctx.showToast,
-        showAutoHint: ctx.showAutoHint,
-        getLessonUICoordinator: () => ctx.lessonUICoordinator,
-        getHintPlayerState: () => ctx.HintPlayerState,
-        log: log,
-      });
-      ctx.registerExpertCharacterHandlers();
+      // --- 6. ExpertCharacterHandler 角色反馈 ---
+      try {
+        if (typeof ExpertCharacterHandler !== 'undefined' && ExpertCharacterHandler.init) {
+          ExpertCharacterHandler.init({
+            getExpertSystem: () => ctx.expertSystem,
+            showCharacterBubble: ctx.showCharacterBubble,
+            showToast: ctx.showToast,
+            showAutoHint: ctx.showAutoHint,
+            getLessonUICoordinator: () => ctx.lessonUICoordinator,
+            getHintPlayerState: () => ctx.HintPlayerState,
+            log: log,
+          });
+          ctx.registerExpertCharacterHandlers();
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] ExpertCharacterHandler 初始化失败，跳过', e);
+      }
 
-      // Get story engine
-      ctx.storyEngine = global.StoryEngine;
+      // --- 7. StoryEngine 剧情引擎 ---
+      try {
+        if (global.StoryEngine) {
+          ctx.storyEngine = global.StoryEngine;
+        } else {
+          throw new Error('StoryEngine not available');
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] StoryEngine 不可用，使用空实现降级', e);
+        ctx.storyEngine = {
+          play: function() { return Promise.resolve(); },
+          isPlaying: function() { return false; },
+          stop: function() {},
+          nextDialogue: function() {},
+          _isPlaying: false,
+        };
+        global.StoryEngine = ctx.storyEngine;
+      }
 
       // Global click to advance story + unlock audio
       document.addEventListener('click', (e) => {
-        if (typeof AudioService !== 'undefined') AudioService.unlock();
-        if (ctx.storyEngine && ctx.storyEngine._isPlaying) {
-          if (e.target.closest('button, .num-btn, #num-pad, #chapter-select-overlay')) return;
-          ctx.storyEngine.nextDialogue();
-        }
+        try {
+          if (typeof AudioService !== 'undefined' && AudioService.unlock) AudioService.unlock();
+        } catch(e) {}
+        try {
+          if (ctx.storyEngine && ctx.storyEngine._isPlaying) {
+            if (e.target.closest && e.target.closest('button, .num-btn, #num-pad, #chapter-select-overlay')) return;
+            if (ctx.storyEngine.nextDialogue) ctx.storyEngine.nextDialogue();
+          }
+        } catch(e) {}
       });
 
-      // Init progress
-      if (global.ProgressManager) ProgressManager.load();
+      // --- 8. ProgressManager 进度管理 ---
+      try {
+        if (global.ProgressManager && ProgressManager.load) {
+          ProgressManager.load();
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] ProgressManager 加载失败，降级', e);
+        if (!global.ProgressManager) {
+          global.ProgressManager = {
+            load: function(){},
+            save: function(){},
+            reset: function(){},
+            _data: { levelScores: {} },
+          };
+        }
+      }
 
       // 检测调试模式
-      const urlParams = new URLSearchParams(window.location.search);
-      const idParam = urlParams.get('id');
-      ctx._debugMode = urlParams.get('debug') === '1';
-      if (ctx._debugMode) log.info('[Debug] 调试模式已启用');
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const idParam = urlParams.get('id');
+        ctx._debugMode = urlParams.get('debug') === '1';
+        if (ctx._debugMode) log.info('[Debug] 调试模式已启用');
+      } catch (e) {
+        ctx._debugMode = false;
+      }
 
-      // 初始化管理器
-      this.initManagers();
-
-      // Setup chapter select
-      this.setupChapterSelect();
-
-      if (idParam) {
-        ctx.currentLevelId = parseInt(idParam) || ctx.currentLevelId;
-        await ctx.startLevel(ctx.currentLevelId);
-      } else {
-        if (ctx.chapterSelect) {
-          await ctx.chapterSelect.loadChapters();
-          ctx.chapterSelect.show();
-        } else {
-          await ctx.startLevel(101);
+      // --- 9. 初始化管理器（核心：initManagers） ---
+      try {
+        this.initManagers();
+      } catch (e) {
+        console.error('[FATAL FALLBACK] initManagers 失败，尝试降级启动', e);
+        // 确保至少有 moduleInitializer 的降级版本
+        if (!this.moduleInitializer) {
+          this.moduleInitializer = {
+            initGameController: function() { return null; },
+            initAchievementCoordinator: function() { return null; },
+            initAutoHintSystem: function() { return null; },
+            initWhatIfManager: function() { return null; },
+            initHintPlayer: function() {},
+            initLessonUICoordinator: function() { return null; },
+            initNarrationSystem: function() {},
+            initGameTimer: function() { return null; },
+          };
+          ctx.moduleInitializer = this.moduleInitializer;
         }
+      }
+
+      // --- 10. Setup chapter select ---
+      try {
+        this.setupChapterSelect();
+      } catch (e) {
+        console.warn('[FALLBACK] setupChapterSelect 失败，跳过章节选择', e);
+        ctx.chapterSelect = null;
+      }
+
+      // --- 11. 启动关卡 ---
+      try {
+        const urlParams2 = new URLSearchParams(window.location.search);
+        const idParam2 = urlParams2.get('id');
+        if (idParam2) {
+          ctx.currentLevelId = parseInt(idParam2) || ctx.currentLevelId;
+          await ctx.startLevel(ctx.currentLevelId);
+        } else {
+          if (ctx.chapterSelect) {
+            await ctx.chapterSelect.loadChapters();
+            ctx.chapterSelect.show();
+          } else {
+            await ctx.startLevel(101);
+          }
+        }
+      } catch (e) {
+        console.error('[FATAL FALLBACK] 关卡启动失败', e);
+        // 显示错误提示
+        try {
+          if (ctx.showToast) ctx.showToast('关卡加载失败，请刷新重试');
+        } catch(e2) {}
       }
     }
 

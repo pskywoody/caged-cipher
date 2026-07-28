@@ -114,93 +114,155 @@
     initGameController() {
       const deps = this.deps;
 
-      // 初始化三幕式引擎
-      if (global.ThreeActEngine && !this.threeActEngine) {
-        this.threeActEngine = new ThreeActEngine({
-          setInteractionLocked: deps.setInteractionLocked,
-          showCharacterBubble: deps.showCharacterBubble,
-          isLastLevelOfChapter: deps.isLastLevelOfChapter,
-        });
-        // 向后兼容：ThreeActGuide 变量指向实例
+      // --- 三幕式引擎 ---
+      try {
+        if (global.ThreeActEngine && !this.threeActEngine) {
+          this.threeActEngine = new ThreeActEngine({
+            setInteractionLocked: deps.setInteractionLocked,
+            showCharacterBubble: deps.showCharacterBubble,
+            isLastLevelOfChapter: deps.isLastLevelOfChapter,
+          });
+          // 向后兼容：ThreeActGuide 变量指向实例
+          global.ThreeActGuide = this.threeActEngine;
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] ThreeActEngine 初始化失败，使用空实现降级', e);
+        this.threeActEngine = {
+          init: function(){},
+          update: function(){},
+          getCurrentAct: function() { return 1; },
+          getActParams: function() {
+            return { aiSpeedMultiplier: 1, hintCooldownMultiplier: 1, comboMultiplier: 1 };
+          },
+          setBoard: function(){},
+          setRenderer: function(){},
+          setStoryEngine: function(){},
+          setLevelData: function(){},
+          setChapterData: function(){},
+        };
         global.ThreeActGuide = this.threeActEngine;
       }
 
-      // 初始化 Boss 战协调器
-      if (global.BossCoordinator && !this.bossCoordinator) {
-        this.bossCoordinator = new BossCoordinator({
-          setInteractionLocked: deps.setInteractionLocked,
-          restartLevel: deps.restartLevel,
-          showCompleteOverlay: deps.showCompleteOverlay,
-          goToChapterSelect: deps.goToChapterSelect,
-          unlockBackground: deps.unlockBackground,
-          reinitBoardForBattle: deps.reinitBoardForBattle,
-          getChapterData: deps.getCurrentChapterData,
-          getLevelData: deps.getCurrentLevelData,
-          setLevelData: deps.setLevelData,
-        });
+      // --- Boss 战协调器 ---
+      try {
+        if (global.BossCoordinator && !this.bossCoordinator) {
+          this.bossCoordinator = new BossCoordinator({
+            setInteractionLocked: deps.setInteractionLocked,
+            restartLevel: deps.restartLevel,
+            showCompleteOverlay: deps.showCompleteOverlay,
+            goToChapterSelect: deps.goToChapterSelect,
+            unlockBackground: deps.unlockBackground,
+            reinitBoardForBattle: deps.reinitBoardForBattle,
+            getChapterData: deps.getCurrentChapterData,
+            getLevelData: deps.getCurrentLevelData,
+            setLevelData: deps.setLevelData,
+          });
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] BossCoordinator 初始化失败，使用空实现降级', e);
+        this.bossCoordinator = {
+          startBattle: function(){},
+          endBattle: function(){},
+          isActive: function() { return false; },
+          setBoard: function(){},
+          setRenderer: function(){},
+          setStoryEngine: function(){},
+          setLevelData: function(){},
+          setChapterData: function(){},
+          setGameController: function(){},
+        };
       }
 
-      // 初始化连击 UI 控制器
-      if (global.ComboUIController && !this.comboUI) {
-        this.comboUI = new ComboUIController();
+      // --- 连击 UI 控制器 ---
+      try {
+        if (global.ComboUIController && !this.comboUI) {
+          this.comboUI = new ComboUIController();
+          global.comboUI = this.comboUI;
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] ComboUIController 初始化失败，降级', e);
+        this.comboUI = {
+          bindComboSystem: function(){},
+          showMilestone: function(){},
+        };
         global.comboUI = this.comboUI;
       }
 
-      // 初始化剧情编排器
-      if (global.StoryOrchestrator) {
-        StoryOrchestrator.init({
-          storyEngine: deps.getStoryEngine(),
-          galleryPanel: this.achievementCoordinator ? this.achievementCoordinator.galleryPanel : null,
-          renderer: deps.getRenderer(),
-          board: deps.getBoard(),
-          AudioService: deps.AudioService,
-          getCurrentLevelData: deps.getCurrentLevelData,
-          getCurrentChapterData: deps.getCurrentChapterData,
-          getCurrentLevelId: deps.getCurrentLevelId,
-          setUIVisible: deps.setUIVisible,
-          setInteractionLocked: deps.setInteractionLocked,
-        });
+      // --- 剧情编排器 ---
+      try {
+        if (global.StoryOrchestrator && StoryOrchestrator.init) {
+          StoryOrchestrator.init({
+            storyEngine: deps.getStoryEngine(),
+            galleryPanel: this.achievementCoordinator ? this.achievementCoordinator.galleryPanel : null,
+            renderer: deps.getRenderer(),
+            board: deps.getBoard(),
+            AudioService: deps.AudioService,
+            getCurrentLevelData: deps.getCurrentLevelData,
+            getCurrentChapterData: deps.getCurrentChapterData,
+            getCurrentLevelId: deps.getCurrentLevelId,
+            setUIVisible: deps.setUIVisible,
+            setInteractionLocked: deps.setInteractionLocked,
+          });
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] StoryOrchestrator 初始化失败，跳过', e);
       }
 
-      // 初始化热力图管理器
-      if (global.HeatmapManager && !this.heatmapManager) {
-        this.heatmapManager = new HeatmapManager({
-          getBoard: deps.getBoard,
-          getRenderer: deps.getRenderer,
-          getCurrentLevelData: deps.getCurrentLevelData,
-          getCurrentLevelId: deps.getCurrentLevelId,
-          isLastLevelOfChapter: deps.isLastLevelOfChapter,
-          showToast: deps.showToast,
-          log: this.log,
-        });
+      // --- 热力图管理器 ---
+      try {
+        if (global.HeatmapManager && !this.heatmapManager) {
+          this.heatmapManager = new HeatmapManager({
+            getBoard: deps.getBoard,
+            getRenderer: deps.getRenderer,
+            getCurrentLevelData: deps.getCurrentLevelData,
+            getCurrentLevelId: deps.getCurrentLevelId,
+            isLastLevelOfChapter: deps.isLastLevelOfChapter,
+            showToast: deps.showToast,
+            log: this.log,
+          });
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] HeatmapManager 初始化失败，降级', e);
+        this.heatmapManager = null;
       }
 
-      // 初始化技巧图鉴
-      if (global.TechniqueEncyclopedia && !this.techniqueEncyclopedia) {
-        this.techniqueEncyclopedia = new TechniqueEncyclopedia({
-          getTeachingSystem: deps.getTeachingSystem,
-          onVisibilityChange: (visible) => {
-            EventLogger.log('game:techniques', { visible: visible });
-          },
-        });
+      // --- 技巧图鉴 ---
+      try {
+        if (global.TechniqueEncyclopedia && !this.techniqueEncyclopedia) {
+          this.techniqueEncyclopedia = new TechniqueEncyclopedia({
+            getTeachingSystem: deps.getTeachingSystem,
+            onVisibilityChange: (visible) => {
+              EventLogger.log('game:techniques', { visible: visible });
+            },
+          });
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] TechniqueEncyclopedia 初始化失败，降级', e);
+        this.techniqueEncyclopedia = null;
       }
 
-      // 初始化关卡特性应用器
-      if (global.LevelFeatureApplier && !this.levelFeatureApplier) {
-        this.levelFeatureApplier = new LevelFeatureApplier({
-          getCurrentLevelData: deps.getCurrentLevelData,
-          getCurrentLevelId: deps.getCurrentLevelId,
-          getRenderer: deps.getRenderer,
-          getBoard: deps.getBoard,
-          getSettingsPanel: deps.getSettingsPanel,
-          getNoteMode: deps.getNoteMode,
-          setNoteMode: deps.setNoteMode,
-          updateNoteButtonState: deps.updateNoteButtonState,
-        });
+      // --- 关卡特性应用器 ---
+      try {
+        if (global.LevelFeatureApplier && !this.levelFeatureApplier) {
+          this.levelFeatureApplier = new LevelFeatureApplier({
+            getCurrentLevelData: deps.getCurrentLevelData,
+            getCurrentLevelId: deps.getCurrentLevelId,
+            getRenderer: deps.getRenderer,
+            getBoard: deps.getBoard,
+            getSettingsPanel: deps.getSettingsPanel,
+            getNoteMode: deps.getNoteMode,
+            setNoteMode: deps.setNoteMode,
+            updateNoteButtonState: deps.updateNoteButtonState,
+          });
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] LevelFeatureApplier 初始化失败，降级', e);
+        this.levelFeatureApplier = null;
       }
 
-      // 创建 GameController
-      this.gameController = new GameController({
+      // --- 创建 GameController（核心，失败则降级） ---
+      try {
+        this.gameController = new GameController({
         // 系统对象
         LevelLoader: global.LevelLoader,
         AudioService: deps.AudioService,
@@ -287,31 +349,70 @@
         log: this.log,
       });
 
-      // 初始化 PauseManager
-      if (global.PauseManager && !this.pauseManagerInitialized) {
-        PauseManager.init({
-          isPaused: deps.getIsPaused,
-          setPaused: deps.setIsPaused,
-          isCompleted: deps.getIsCompleted,
-          getBoard: deps.getBoard,
-          getGameTimer: deps.getGameTimer,
-          getExpertSystem: deps.getExpertSystem,
-          getStartTime: deps.getStartTime,
-          getGameController: () => this.gameController,
-          getSettingsPanel: deps.getSettingsPanel,
-          AudioService: deps.AudioService,
-        });
-        this.pauseManagerInitialized = true;
-      }
+        // 初始化 PauseManager
+        if (global.PauseManager && !this.pauseManagerInitialized) {
+          try {
+            PauseManager.init({
+              isPaused: deps.getIsPaused,
+              setPaused: deps.setIsPaused,
+              isCompleted: deps.getIsCompleted,
+              getBoard: deps.getBoard,
+              getGameTimer: deps.getGameTimer,
+              getExpertSystem: deps.getExpertSystem,
+              getStartTime: deps.getStartTime,
+              getGameController: () => this.gameController,
+              getSettingsPanel: deps.getSettingsPanel,
+              AudioService: deps.AudioService,
+            });
+            this.pauseManagerInitialized = true;
+          } catch (e) {
+            console.warn('[FALLBACK] PauseManager 初始化失败，跳过', e);
+          }
+        }
 
-      // 初始化 EndingManager
-      if (global.EndingManager && !this.endingManagerInitialized) {
-        EndingManager.init({
-          getCurrentChapterData: deps.getCurrentChapterData,
-          getChapterSelect: deps.getChapterSelect,
-          getProgressManager: () => global.ProgressManager,
-        });
-        this.endingManagerInitialized = true;
+        // 初始化 EndingManager
+        if (global.EndingManager && !this.endingManagerInitialized) {
+          try {
+            EndingManager.init({
+              getCurrentChapterData: deps.getCurrentChapterData,
+              getChapterSelect: deps.getChapterSelect,
+              getProgressManager: () => global.ProgressManager,
+            });
+            this.endingManagerInitialized = true;
+          } catch (e) {
+            console.warn('[FALLBACK] EndingManager 初始化失败，跳过', e);
+          }
+        }
+
+      } catch (e) {
+        console.error('[FATAL FALLBACK] GameController 初始化失败，使用最小降级', e);
+        // GameController 失败时，至少保证 gameController 不为 null，提供最小接口
+        this.gameController = {
+          board: null,
+          renderer: null,
+          hintSystem: {
+            getHint: function() { return null; },
+            getHintCount: function() { return 0; },
+            useHint: function() { return false; },
+          },
+          comboSystem: {
+            onCorrectFill: function(){},
+            onWrongFill: function(){},
+            onErase: function(){},
+            reset: function(){},
+            getFlowState: function() { return 'cold'; },
+            getCombo: function() { return 0; },
+          },
+          comedySystem: {
+            onFirstNote: function(){},
+            onCombo: function(){},
+            onError: function(){},
+            onBossDefeated: function(){},
+          },
+          loadLevel: function() { return Promise.reject(new Error('GameController degraded')); },
+          startLevel: function() { return Promise.reject(new Error('GameController degraded')); },
+          initBoard: function() {},
+        };
       }
 
       return this.gameController;
@@ -399,33 +500,50 @@
     //  WhatIfManager 初始化
     // ============================================================
     initWhatIfManager() {
-      if (!global.WhatIfManager) return null;
+      if (!global.WhatIfManager) return this._getWhatIfFallback();
       if (this.whatIfManager) return this.whatIfManager;
 
       const deps = this.deps;
 
-      this.whatIfManager = new WhatIfManager({
-        board: deps.getBoard(),
-        renderer: deps.getRenderer(),
-        techMatrix: deps.getTechMatrix(),
-        lessonPlayer: null,
-        AudioService: deps.AudioService,
-        onShowToast: deps.showToast,
-        onUpdateRule45Banner: deps.updateRule45Banner,
-        isCompleted: deps.getIsCompleted,
-        isStoryPlaying: () => {
-          const se = deps.getStoryEngine();
-          return se && se._isPlaying;
-        },
-        onUpdateFloatBarTabIcon: deps.updateFloatBarTabIcon,
-      });
+      try {
+        this.whatIfManager = new WhatIfManager({
+          board: deps.getBoard(),
+          renderer: deps.getRenderer(),
+          techMatrix: deps.getTechMatrix(),
+          lessonPlayer: null,
+          AudioService: deps.AudioService,
+          onShowToast: deps.showToast,
+          onUpdateRule45Banner: deps.updateRule45Banner,
+          isCompleted: deps.getIsCompleted,
+          isStoryPlaying: () => {
+            const se = deps.getStoryEngine();
+            return se && se._isPlaying;
+          },
+          onUpdateFloatBarTabIcon: deps.updateFloatBarTabIcon,
+        });
 
-      // 同步到 gameController
-      if (this.gameController) {
-        this.gameController.whatIfManager = this.whatIfManager;
+        // 同步到 gameController
+        if (this.gameController) {
+          this.gameController.whatIfManager = this.whatIfManager;
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] WhatIfManager 初始化失败，使用空实现降级', e);
+        this.whatIfManager = this._getWhatIfFallback();
       }
 
       return this.whatIfManager;
+    }
+
+    /**
+     * WhatIfManager 降级空实现
+     */
+    _getWhatIfFallback() {
+      return {
+        enterMode: function(){},
+        exitMode: function(){},
+        isActive: function() { return false; },
+        addSnapshot: function(){},
+      };
     }
 
     // ============================================================

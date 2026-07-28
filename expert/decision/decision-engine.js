@@ -466,6 +466,20 @@
     decide(state) {
       if (!this._levelActive) return [];
 
+      // 使用 SafeCall 包裹决策评估，防止决策层卡死
+      const sc = global.SafeCall;
+      if (sc && typeof sc.callWithTimeout === 'function') {
+        return sc.callWithTimeout(
+          () => this._doDecide(state),
+          [],
+          500,
+          { label: 'DecisionEngine.decide' }
+        );
+      }
+      return this._doDecide(state);
+    }
+
+    _doDecide(state) {
       const commands = [];
       const now = Date.now();
 
@@ -509,6 +523,20 @@
      * @returns {Array} 决策命令列表
      */
     evaluateFromContext() {
+      // 使用 SafeCall 包裹整个评估流程，防止决策层异常导致游戏崩溃
+      const sc = global.SafeCall;
+      if (sc && typeof sc.callWithTimeout === 'function') {
+        return sc.callWithTimeout(
+          () => this._doEvaluateFromContext(),
+          [],
+          800,
+          { label: 'DecisionEngine.evaluateFromContext' }
+        );
+      }
+      return this._doEvaluateFromContext();
+    }
+
+    _doEvaluateFromContext() {
       try {
         const ctx = global.GameContext;
         if (!ctx || !ctx.player) return [];

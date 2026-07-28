@@ -95,10 +95,21 @@
     _execute(command) {
       const handler = this._handlers[command.action];
       if (handler) {
-        try {
-          handler(command.payload || {});
-        } catch(e) {
-          console.error('ExpressionDirector: handler error', command.action, e);
+        // 使用 SafeCall 包裹动作执行，防止单个 handler 异常影响整个表达层
+        const sc = global.SafeCall;
+        if (sc && typeof sc.callWithTimeout === 'function') {
+          sc.callWithTimeout(
+            () => handler(command.payload || {}),
+            undefined,
+            300,
+            { label: 'ExpressionDirector.' + command.action }
+          );
+        } else {
+          try {
+            handler(command.payload || {});
+          } catch(e) {
+            console.error('ExpressionDirector: handler error', command.action, e);
+          }
         }
       } else {
         console.warn('ExpressionDirector: unknown action', command.action);

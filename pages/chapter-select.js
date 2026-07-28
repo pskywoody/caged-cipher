@@ -363,7 +363,9 @@
             this._syncToDataStore();
             return this._data;
           }
-          // 主存档损坏，尝试从备份恢复
+          // 主存档损坏，先备份再尝试从备份恢复
+          console.warn('[ProgressManager] Main save corrupted, reason:', result.reason);
+          this._handleCorruptedSave(raw, result.reason || 'unknown');
           console.warn('[ProgressManager] Main save corrupted, trying backups...');
           const backupResult = this._loadFromBackup();
           if (backupResult.ok) {
@@ -574,40 +576,181 @@
      * 支持两种格式：
      *   1. 新版：{ version, data, checksum }
      *   2. 旧版：直接是数据对象（无 checksum，兼容加载）
+     * 校验步骤：
+     *   1. JSON 解析
+     *   2. 格式识别（新版/旧版）
+     *   3. 校验和验证（新版）
+     *   4. 关键字段存在性检查
+     *   5. 关键字段类型检查
      * @param {string} raw - localStorage 原始字符串
-     * @returns {Object} { ok: boolean, data: Object }
+     * @returns {Object} { ok: boolean, data: Object, reason?: string }
      */
     _tryParseAndValidate(raw) {
       try {
         const parsed = JSON.parse(raw);
+
+        let data;
+        let hasChecksum = false;
 
         // 判断是否为新版包装格式（有 version 和 data 和 checksum 字段）
         if (parsed && typeof parsed === 'object' &&
             'version' in parsed && 'data' in parsed && 'checksum' in parsed &&
             typeof parsed.data === 'object') {
           // 新版格式：验证 checksum
+          hasChecksum = true;
           const dataStr = JSON.stringify(parsed.data);
           const expectedChecksum = this._computeChecksum(
             String(parsed.version) + dataStr + CHECKSUM_SALT
           );
           if (parsed.checksum === expectedChecksum) {
             // 校验通过
-            return { ok: true, data: parsed.data };
+            data = parsed.data;
           } else {
             // 校验失败，视为数据损坏
             console.warn('[ProgressManager] Checksum mismatch, data may be tampered');
-            return { ok: false, data: null };
+            return { ok: false, data: null, reason: 'checksum_mismatch' };
           }
         } else {
           // 旧版格式（直接是数据对象），向后兼容
-          // 旧版没有 checksum，直接加载，保存时会自动加上
           console.log('[ProgressManager] Legacy save format detected, will add checksum on next save');
-          return { ok: true, data: parsed };
+          data = parsed;
         }
+
+        // === 关键字段存在性检查 ===
+        const requiredFields = [
+          'levelScores',
+          'unlockedChapters',
+          'currentCycle',
+          'achievements',
+        ];
+        const missingFields = requiredFields.filter(f => data[f] === undefined);
+        if (missingFields.length > 0) {
+          console.warn('[ProgressManager] Save missing required fields:', missingFields);
+          return { ok: false, data: null, reason: 'missing_fields:' + missingFields.join(',') };
+        }
+
+        // === 关键字段类型检查 ===
+        const typeErrors = [];
+        if (typeof data.levelScores !== 'object' || data.levelScores === null || Array.isArray(data.levelScores)) {
+          typeErrors.push('levelScores should be object');
+        }
+        if (!Array.isArray(data.unlockedChapters)) {
+          typeErrors.push('unlockedChapters should be array');
+        }
+        if (typeof data.currentCycle !== 'number' || data.currentCycle < 1) {
+          typeErrors.push('currentCycle invalid');
+        }
+        if (!Array.isArray(data.achievements)) {
+          typeErrors.push('achievements should be array');
+        }
+        if (typeErrors.length > 0) {
+          console.warn('[ProgressManager] Save field type errors:', typeErrors);
+          return { ok: false, data: null, reason: 'invalid_type:' + typeErrors.join(';') };
+        }
+
+        // === 可修复字段：补齐缺失的可选字段（不视为损坏，直接迁移） ===
+        // 这些字段缺失时由 _migrate() 补齐，这里只标记需要迁移
+        let needsMigration = false;
+        if (!data.version || typeof data.version !== 'number') {
+          needsMigration = true;
+        }
+        if (!data.unlockedHiddenLevels || !Array.isArray(data.unlockedHiddenLevels)) {
+          needsMigration = true;
+        }
+        if (!data.skillStats || typeof data.skillStats !== 'object') {
+          needsMigration = true;
+        }
+
+        return { ok: true, data: data, hasChecksum: hasChecksum, needsMigration: needsMigration };
       } catch (e) {
         console.warn('[ProgressManager] Parse failed:', e);
-        return { ok: false, data: null };
+        return { ok: false, data: null, reason: 'parse_error:' + e.message };
       }
+    },
+
+    /**
+     * 处理损坏的存档：
+     * 1. 备份损坏的数据到 localStorage（最多保留 3 份）
+     * 2. 返回默认数据
+     * 损坏的存档不会被自动删除，而是保留在备份中供调试使用
+     * @param {string|Object} rawData - 原始数据（字符串或对象）
+     * @param {string} reason - 损坏原因
+     * @returns {Object} 默认数据
+     */
+    _handleCorruptedSave: function(rawData, reason) {
+      try {
+        const CORRUPTED_BACKUP_KEY = 'cagemaster3_corrupted_save_backups';
+        const MAX_CORRUPTED_BACKUPS = 3;
+
+        // 读取已有备份
+        let backups = [];
+        try {
+          const raw = localStorage.getItem(CORRUPTED_BACKUP_KEY);
+          if (raw) {
+            backups = JSON.parse(raw);
+            if (!Array.isArray(backups)) backups = [];
+          }
+        } catch (e) {
+          backups = [];
+        }
+
+        // 准备要备份的数据
+        let dataStr = '';
+        if (typeof rawData === 'string') {
+          dataStr = rawData.substring(0, 5000);
+        } else if (rawData && typeof rawData === 'object') {
+          try {
+            dataStr = JSON.stringify(rawData).substring(0, 5000);
+          } catch (e) {
+            dataStr = String(rawData).substring(0, 5000);
+          }
+        } else {
+          dataStr = String(rawData).substring(0, 5000);
+        }
+
+        // 添加新备份（最新的在最前面）
+        backups.unshift({
+          reason: reason || 'unknown',
+          data: dataStr,
+          time: new Date().toISOString(),
+          timestamp: Date.now(),
+        });
+
+        // 只保留最近的 N 份
+        backups = backups.slice(0, MAX_CORRUPTED_BACKUPS);
+
+        // 保存备份
+        try {
+          localStorage.setItem(CORRUPTED_BACKUP_KEY, JSON.stringify(backups));
+          console.log('[ProgressManager] Corrupted save backed up (reason:', reason + ')', 'total backups:', backups.length);
+        } catch (e) {
+          console.warn('[ProgressManager] Failed to save corrupted backup:', e);
+        }
+      } catch (e) {
+        // 备份过程中出错不影响主流程
+        console.warn('[ProgressManager] _handleCorruptedSave error:', e);
+      }
+
+      // 返回默认数据
+      return this._defaultData();
+    },
+
+    /**
+     * 获取损坏存档备份列表（用于调试）
+     * @returns {Array} 损坏存档备份列表
+     */
+    _getCorruptedBackups: function() {
+      try {
+        const CORRUPTED_BACKUP_KEY = 'cagemaster3_corrupted_save_backups';
+        const raw = localStorage.getItem(CORRUPTED_BACKUP_KEY);
+        if (raw) {
+          const backups = JSON.parse(raw);
+          return Array.isArray(backups) ? backups : [];
+        }
+      } catch (e) {
+        // 静默失败
+      }
+      return [];
     },
 
     /**

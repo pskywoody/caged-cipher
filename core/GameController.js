@@ -357,154 +357,231 @@
     initBoard() {
       if (!this.currentLevelData) return;
 
-      this.board = new this.BoardClass(this.currentLevelData.gridSize || 9);
-      this.board.loadLevel({
-        cells: this.currentLevelData.boardData,
-        cages: this.currentLevelData.cages || [],
-        levelId: this.currentLevelId,
-        // Boss战机制数据（普通关卡没有这些字段，loadLevel 会自动设为 null）
-        lockCells: this.currentLevelData.lockCells,
-        fakeCells: this.currentLevelData.fakeCells,
-        regionLocks: this.currentLevelData.regionLocks,
-        cageCollapse: this.currentLevelData.cageCollapse,
-        dualPath: this.currentLevelData.dualPath,
-        phases: this.currentLevelData.phases,
-      });
-
-      this.renderer = new this.RendererClass('gameCanvas');
-      // Set theme for chapter
-      const chapterId = this.currentChapterData ? this.currentChapterData.chapterId : 1;
-      this.renderer.setTheme(chapterId);
-      // 设置关卡专属背景（每关一张独立背景图）
-      if (typeof this.renderer.setLevelBackground === 'function') {
-        this.renderer.setLevelBackground(this.currentLevelId);
-      }
-      // P2-3: 同步当前画质等级（从 PerformanceMonitor）
-      if (typeof PerformanceMonitor !== 'undefined' &&
-          typeof this.renderer.setQualityLevel === 'function') {
-        this.renderer.setQualityLevel(PerformanceMonitor.getQualityLevel());
-      }
-      this.renderer.recalcCellSize(this.board);
-      this.renderer.render(this.board);
-
-      // Initialize Note System (candidate display)
-      if (typeof this.NoteSystemClass !== 'undefined' && this.NoteSystemClass) {
-        const noteSys = new this.NoteSystemClass(this.board, this.renderer, {
-          perspective: 'hero', // hero/yan/ying - default hero mode
-          mode: 'classic',     // 经典模式：笔记模式下全显
-          maxGlimpseCount: 3,
-          glimpseDuration: 3000,
+      // --- Board 棋盘数据（基础，必须成功） ---
+      try {
+        this.board = new this.BoardClass(this.currentLevelData.gridSize || 9);
+        this.board.loadLevel({
+          cells: this.currentLevelData.boardData,
+          cages: this.currentLevelData.cages || [],
+          levelId: this.currentLevelId,
+          // Boss战机制数据（普通关卡没有这些字段，loadLevel 会自动设为 null）
+          lockCells: this.currentLevelData.lockCells,
+          fakeCells: this.currentLevelData.fakeCells,
+          regionLocks: this.currentLevelData.regionLocks,
+          cageCollapse: this.currentLevelData.cageCollapse,
+          dualPath: this.currentLevelData.dualPath,
+          phases: this.currentLevelData.phases,
         });
-        window.gameNoteSystem = noteSys;
-        this.renderer.setNoteSystem(noteSys);
-        global.guideNoteSystem = noteSys;
+      } catch (e) {
+        console.error('[FATAL FALLBACK] Board 初始化失败', e);
+        throw e; // Board 是核心依赖，失败不降级
       }
 
-      // Initialize hint system
-      // Initialize teaching system (role-guided learning)
-      let teachingSys = null;
-      if (typeof this.TeachingSystemClass !== 'undefined' && this.TeachingSystemClass) {
-        teachingSys = new this.TeachingSystemClass();
-        teachingSys.load();
-        global.guideTeachingSystem = teachingSys;
-      }
-
-      // Initialize hint system with teaching integration
-      this.hintSystem = new this.HintSystemClass(this.board, this.currentLevelData.solution, {
-        teachingSystem: teachingSys
-      });
-
-      // Initialize Rule45 banner (顶部常驻 HUD，仅 9x9 显示，201关起解锁)
-      const banner = document.getElementById('rule45-banner');
-      const pcNotebook = document.getElementById('pc-rule45-notebook');
-      const levelIdNum = parseInt(this.currentLevelId);
-      const rule45Unlocked = levelIdNum >= 201;
-      if (typeof this.Rule45Class !== 'undefined' && this.Rule45Class &&
-          this.board.cages.length > 0 && this.board.size === 9 && rule45Unlocked) {
-        if (banner) banner.style.display = 'block';
-        if (pcNotebook) pcNotebook.style.display = '';
-        // 调用外部 initRule45Banner
-        if (typeof this.onInitRule45Banner === 'function') {
-          this.onInitRule45Banner();
+      // --- Renderer 渲染器（核心，失败则降级为简化渲染） ---
+      try {
+        this.renderer = new this.RendererClass('gameCanvas');
+        // Set theme for chapter
+        const chapterId = this.currentChapterData ? this.currentChapterData.chapterId : 1;
+        this.renderer.setTheme(chapterId);
+        // 设置关卡专属背景（每关一张独立背景图）
+        if (typeof this.renderer.setLevelBackground === 'function') {
+          this.renderer.setLevelBackground(this.currentLevelId);
         }
-        this.onUpdateRule45Banner(null);
-      } else {
-        if (banner) banner.style.display = 'none';
-        if (pcNotebook) pcNotebook.style.display = 'none';
-        this.onResetRule45Banner();
+        // P2-3: 同步当前画质等级（从 PerformanceMonitor）
+        if (typeof PerformanceMonitor !== 'undefined' &&
+            typeof this.renderer.setQualityLevel === 'function') {
+          this.renderer.setQualityLevel(PerformanceMonitor.getQualityLevel());
+        }
+        this.renderer.recalcCellSize(this.board);
+        this.renderer.render(this.board);
+      } catch (e) {
+        console.warn('[FALLBACK] Renderer 初始化失败，使用降级渲染器', e);
+        // 渲染器降级空实现（防止渲染相关调用报错）
+        this.renderer = {
+          render: function(){},
+          recalcCellSize: function(){},
+          setTheme: function(){},
+          setLevelBackground: function(){},
+          setQualityLevel: function(){},
+          setNoteSystem: function(){},
+          setComboCount: function(){},
+          forceRender: false,
+        };
       }
 
-      // Initialize TechMatrix (技术矩阵)
-      if (typeof this.TechMatrixClass !== 'undefined' && this.TechMatrixClass) {
-        if (this.techMatrix) {
-          // 更新现有实例
-          this.techMatrix.setBoard(this.board);
-          this.techMatrix.setRenderer(this.renderer);
-        } else {
-          this.techMatrix = new this.TechMatrixClass({
-            board: this.board,
-            techRater: typeof this.TechRaterClass !== 'undefined' ? this.TechRaterClass : null,
-            renderer: this.renderer,
-            onClose: () => {
-              // 关闭时清理高亮
-            },
+      // --- Note System 笔记系统 ---
+      try {
+        if (typeof this.NoteSystemClass !== 'undefined' && this.NoteSystemClass) {
+          const noteSys = new this.NoteSystemClass(this.board, this.renderer, {
+            perspective: 'hero', // hero/yan/ying - default hero mode
+            mode: 'classic',     // 经典模式：笔记模式下全显
+            maxGlimpseCount: 3,
+            glimpseDuration: 3000,
           });
-          global.guideTechMatrix = this.techMatrix;
+          window.gameNoteSystem = noteSys;
+          if (this.renderer && this.renderer.setNoteSystem) {
+            this.renderer.setNoteSystem(noteSys);
+          }
+          global.guideNoteSystem = noteSys;
         }
+      } catch (e) {
+        console.warn('[FALLBACK] NoteSystem 初始化失败，跳过', e);
+      }
+
+      // --- Teaching System 教学系统 ---
+      let teachingSys = null;
+      try {
+        if (typeof this.TeachingSystemClass !== 'undefined' && this.TeachingSystemClass) {
+          teachingSys = new this.TeachingSystemClass();
+          teachingSys.load();
+          global.guideTeachingSystem = teachingSys;
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] TeachingSystem 初始化失败，跳过', e);
+      }
+
+      // --- HintSystem 提示系统 ---
+      try {
+        this.hintSystem = new this.HintSystemClass(this.board, this.currentLevelData.solution, {
+          teachingSystem: teachingSys
+        });
+      } catch (e) {
+        console.warn('[FALLBACK] HintSystem 初始化失败，使用空实现降级', e);
+        this.hintSystem = {
+          getHint: function() { return null; },
+          getHintCount: function() { return 0; },
+          useHint: function() { return false; },
+        };
+      }
+
+      // --- Rule45 banner ---
+      try {
+        const banner = document.getElementById('rule45-banner');
+        const pcNotebook = document.getElementById('pc-rule45-notebook');
+        const levelIdNum = parseInt(this.currentLevelId);
+        const rule45Unlocked = levelIdNum >= 201;
+        if (typeof this.Rule45Class !== 'undefined' && this.Rule45Class &&
+            this.board.cages.length > 0 && this.board.size === 9 && rule45Unlocked) {
+          if (banner) banner.style.display = 'block';
+          if (pcNotebook) pcNotebook.style.display = '';
+          // 调用外部 initRule45Banner
+          if (typeof this.onInitRule45Banner === 'function') {
+            this.onInitRule45Banner();
+          }
+          this.onUpdateRule45Banner(null);
+        } else {
+          if (banner) banner.style.display = 'none';
+          if (pcNotebook) pcNotebook.style.display = 'none';
+          this.onResetRule45Banner();
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] Rule45 初始化失败，跳过', e);
+      }
+
+      // --- TechMatrix 技术矩阵 ---
+      try {
+        if (typeof this.TechMatrixClass !== 'undefined' && this.TechMatrixClass) {
+          if (this.techMatrix) {
+            // 更新现有实例
+            this.techMatrix.setBoard(this.board);
+            this.techMatrix.setRenderer(this.renderer);
+          } else {
+            this.techMatrix = new this.TechMatrixClass({
+              board: this.board,
+              techRater: typeof this.TechRaterClass !== 'undefined' ? this.TechRaterClass : null,
+              renderer: this.renderer,
+              onClose: () => {
+                // 关闭时清理高亮
+              },
+            });
+            global.guideTechMatrix = this.techMatrix;
+          }
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] TechMatrix 初始化失败，降级', e);
+        this.techMatrix = null;
       }
 
       global.guideBoard = this.board;
       global.guideRenderer = this.renderer;
 
-      // Configure expert system with board (enables replay system and dynamic thresholds)
-      if (this.expertSystem && typeof this.expertSystem.init === 'function') {
-        let levelsCompleted = 0;
-        if (this.ProgressManager && this.ProgressManager._data && this.ProgressManager._data.levelScores) {
-          levelsCompleted = Object.keys(this.ProgressManager._data.levelScores).length;
+      // --- ExpertSystem 配置（盘面相关） ---
+      try {
+        if (this.expertSystem && typeof this.expertSystem.init === 'function') {
+          let levelsCompleted = 0;
+          if (this.ProgressManager && this.ProgressManager._data && this.ProgressManager._data.levelScores) {
+            levelsCompleted = Object.keys(this.ProgressManager._data.levelScores).length;
+          }
+          this.expertSystem.init({
+            board: this.board,
+            dynamicThresholds: true,
+            levelsCompleted: levelsCompleted,
+            onFeedback: (msg, level) => this.onShowToast(msg),
+          });
+          // 设置盘面尺寸，动态调整心流/EUREKA 阈值
+          const gridSize = this.currentLevelData.gridSize || 9;
+          if (typeof this.expertSystem.setGridSize === 'function') {
+            this.expertSystem.setGridSize(gridSize);
+          }
         }
-        this.expertSystem.init({
-          board: this.board,
-          dynamicThresholds: true,
-          levelsCompleted: levelsCompleted,
-          onFeedback: (msg, level) => this.onShowToast(msg),
-        });
-        // 设置盘面尺寸，动态调整心流/EUREKA 阈值
-        const gridSize = this.currentLevelData.gridSize || 9;
-        if (typeof this.expertSystem.setGridSize === 'function') {
-          this.expertSystem.setGridSize(gridSize);
-        }
+      } catch (e) {
+        console.warn('[FALLBACK] ExpertSystem 配置失败，跳过', e);
       }
 
-      // Initialize Combo System (连击系统)
-      if (typeof this.ComboSystemClass !== 'undefined' && this.ComboSystemClass) {
-        const gridSize = this.currentLevelData.gridSize || 9;
-        const chapterId = this.currentChapterData ? this.currentChapterData.chapterId : 1;
-        const isNewPlayer = chapterId <= 1 && gridSize <= 4; // 第1章4x4为新手保护
-        this.comboSystem = new this.ComboSystemClass({
-          gridSize: gridSize,
-          isNewPlayer: isNewPlayer,
-          onComboChange: (count) => {
-            // 同步连击数到渲染器（燃烧效果）
-            if (this.renderer && typeof this.renderer.setComboCount === 'function') {
-              this.renderer.setComboCount(count);
-            }
-            // 吐槽系统：连击变化
-            if (this.comedySystem) {
-              this.comedySystem.onComboChange(count);
-            }
-          },
-          onMilestone: (level, milestone) => {
-            // 里程碑音效
-            if (milestone.sfx && this.AudioService) {
-              this.AudioService.sfx.play(milestone.sfx);
-            }
-            // 由外部处理震动等其他里程碑效果
-            if (typeof this.onComboMilestone === 'function') {
-              this.onComboMilestone(level, milestone);
-            }
-          },
-        });
-        global.guideComboSystem = this.comboSystem;
+      // --- ComboSystem 连击系统 ---
+      try {
+        if (typeof this.ComboSystemClass !== 'undefined' && this.ComboSystemClass) {
+          const gridSize = this.currentLevelData.gridSize || 9;
+          const chapterId = this.currentChapterData ? this.currentChapterData.chapterId : 1;
+          const isNewPlayer = chapterId <= 1 && gridSize <= 4; // 第1章4x4为新手保护
+          this.comboSystem = new this.ComboSystemClass({
+            gridSize: gridSize,
+            isNewPlayer: isNewPlayer,
+            onComboChange: (count) => {
+              // 同步连击数到渲染器（燃烧效果）
+              if (this.renderer && typeof this.renderer.setComboCount === 'function') {
+                this.renderer.setComboCount(count);
+              }
+              // 吐槽系统：连击变化
+              if (this.comedySystem) {
+                try { this.comedySystem.onComboChange(count); } catch(e) {}
+              }
+            },
+            onMilestone: (level, milestone) => {
+              // 里程碑音效
+              try {
+                if (milestone.sfx && this.AudioService) {
+                  this.AudioService.sfx.play(milestone.sfx);
+                }
+              } catch(e) {}
+              // 由外部处理震动等其他里程碑效果
+              if (typeof this.onComboMilestone === 'function') {
+                try { this.onComboMilestone(level, milestone); } catch(e) {}
+              }
+            },
+          });
+          global.guideComboSystem = this.comboSystem;
+        } else {
+          // 没有 ComboSystem 类时，提供降级空实现
+          this.comboSystem = {
+            onCorrectFill: function(){},
+            onWrongFill: function(){},
+            onErase: function(){},
+            reset: function(){},
+            getFlowState: function() { return 'cold'; },
+            getCombo: function() { return 0; },
+          };
+        }
+      } catch (e) {
+        console.warn('[FALLBACK] ComboSystem 初始化失败，使用空实现降级', e);
+        this.comboSystem = {
+          onCorrectFill: function(){},
+          onWrongFill: function(){},
+          onErase: function(){},
+          reset: function(){},
+          getFlowState: function() { return 'cold'; },
+          getCombo: function() { return 0; },
+        };
       }
 
       // 自动填充候选数（受全局设置控制）
