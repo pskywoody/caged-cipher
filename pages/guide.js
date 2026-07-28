@@ -13,6 +13,9 @@
   const GameController = window.GameController;
   const HintPlayer = window.HintPlayer;
   const NarrationSystem = window.NarrationSystem;
+  const LessonUICoordinator = window.LessonUICoordinator;
+  const AchievementCoordinator = window.AchievementCoordinator;
+  const StoryOrchestrator = window.StoryOrchestrator;
 
   // === 第四阶段抽离：GameController 和 WhatIfManager 实例 ===
   let gameController = null;
@@ -67,22 +70,21 @@
   let noteMode = false;
   let hintSystem = null;
   let hintCount = 0;
-  let lessonPlayer = null;       // 教学引导播放器
-  let lessonBubble = null;      // 教学气泡元素
-  let lessonSkipBtn = null;      // 跳过教学按钮
+
+  // === 第七阶段抽离：教学引导 UI 协调器 ===
+  let lessonUICoordinator = null;
 
   let errorCount = 0;
   let chapterSelect = null;
   let startedFromSelect = false;
-  let achievementPanel = null;
+  // === 第七阶段抽离：成就/印章协调器 ===
+  // achievementPanel / galleryPanel 已迁移到 achievementCoordinator
   let settingsPanel = null;
-  let galleryPanel = null;
+  let achievementCoordinator = null;
   let techMatrix = null;
   let gameTimer = null;
   let isPaused = false;
   let pauseElapsedTime = 0;
-  let noHintStreak = 0; // 连续不使用提示的关卡数（用于 no_hint_run 成就）
-  let lastHintTechnique = null; // 最近一次提示使用的技巧名（用于技巧类成就判定）
   let usedNotes = false; // 本关是否使用了笔记（用于岩之印记判定）
 
   // 开发调试模式
@@ -371,6 +373,11 @@
 
     log.info('[Boss] 棋盘已重新初始化为对战关卡');
 
+    // 同步到 StoryOrchestrator（第七阶段抽离）
+    if (StoryOrchestrator) {
+      StoryOrchestrator.setBoard(board);
+    }
+
     // 同步到 ThreeActEngine 和 BossCoordinator（第六阶段抽离）
     if (threeActEngine) {
       threeActEngine.setBoard(board);
@@ -448,13 +455,10 @@
       bossCoordinator.cleanup();
     }
 
-    // 清理教学引导系统
-    if (lessonPlayer) {
-      lessonPlayer.destroy();
-      lessonPlayer = null;
+    // 清理教学引导系统（第七阶段抽离至 game/lesson-ui-coordinator.js）
+    if (lessonUICoordinator) {
+      lessonUICoordinator.cleanup();
     }
-    _hideLessonBubble();
-    _hideLessonSkipBtn();
 
     // 隐藏暂停菜单
     const pauseOverlay = document.getElementById('pause-overlay');
@@ -476,385 +480,34 @@
 
   // ============================================================
   // LessonPlayer - 教学引导系统
+  // 已迁移至 game/lesson-ui-coordinator.js (LessonUICoordinator)
+  // 向后兼容：转发到 lessonUICoordinator 实例
   // ============================================================
 
+  function _initLessonUICoordinator() {
+    if (!LessonUICoordinator) return;
+    if (lessonUICoordinator) return;
+
+    lessonUICoordinator = new LessonUICoordinator({
+      getBoard: () => board,
+      getRenderer: () => renderer,
+      getCurrentLevelData: () => currentLevelData,
+      getNoteMode: () => noteMode,
+      toggleNoteMode: (force) => toggleNoteMode(force),
+      recordTechniqueUsage: (name) => recordTechniqueUsage(name),
+      renderBoard: () => { if (renderer) renderer.render(board); },
+    });
+  }
+
   function _startLessonPlayer() {
-    if (typeof LessonPlayer === 'undefined') return;
-    if (!currentLevelData?.lessonPlan) return;
-
-    // 创建 LessonPlayer 实例
-    lessonPlayer = new LessonPlayer({
-      board: board,
-      renderer: renderer,
-      levelData: currentLevelData,
-    });
-
-    // 注册回调
-    lessonPlayer
-      .onComplete(() => {
-        log.info('[LessonPlayer] 教学完成');
-        _hideLessonSkipBtn();
-        _hideLessonBubble();
-        _hideLessonTapHint();
-        _clearAllButtonHighlights();
-        // 教学完成：记录该技巧的首次使用（教学判定）
-        if (global.ProgressManager && currentLevelData?.lessonPlan?.newSkill) {
-          recordTechniqueUsage(currentLevelData.lessonPlan.newSkill);
-        }
-      })
-      .onSkip(() => {
-        log.info('[LessonPlayer] 玩家跳过教学');
-        _hideLessonSkipBtn();
-        _hideLessonBubble();
-        _hideLessonTapHint();
-        _clearAllButtonHighlights();
-      })
-      .onNeedInput((phase, data) => {
-        log.info('[LessonPlayer] 等待输入:', phase, data);
-        // NOTE_ONLY 模式：自动切换到笔记模式，并选中目标格
-        if (data?.interactionType === 'NOTE_ONLY') {
-          if (!noteMode) {
-            toggleNoteMode(true); // 强制开启笔记模式
-          }
-          // 自动选中目标格
-          if (data.cell && board) {
-            board.selectCell(data.cell[0], data.cell[1]);
-            if (renderer) renderer.render(board);
-          }
-        }
-      })
-      .onPhaseChange((phase, prev) => {
-        // 根据阶段更新跳过按钮显示
-        if (phase === 'free' || phase === 'done') {
-          _hideLessonSkipBtn();
-        } else {
-          _showLessonSkipBtn();
-        }
-        // guided 及之后阶段隐藏"点击继续"提示
-        if (phase === 'guided' || phase === 'semiAuto' || phase === 'free' || phase === 'done') {
-          _hideLessonTapHint();
-        }
-      });
-
-    // 监听气泡事件
-    document.addEventListener('lesson-bubble', _onLessonBubble);
-
-    // 监听按钮高亮事件
-    document.addEventListener('lesson-highlight-button', _onLessonHighlightButton);
-
-    // 启动
-    const started = lessonPlayer.start();
-    if (started) {
-      _showLessonSkipBtn();
-      log.info('[LessonPlayer] 已启动:', currentLevelData.lessonPlan.newSkill);
-    }
+    if (!lessonUICoordinator) _initLessonUICoordinator();
+    if (!lessonUICoordinator) return;
+    lessonUICoordinator.start();
   }
 
-  function _onLessonBubble(e) {
-    const { text, speaker, voiceId } = e.detail;
-    // intro/demo 阶段显示"点击继续"提示
-    const phase = lessonPlayer ? lessonPlayer.currentPhase : null;
-    const showTapHint = (phase === 'intro' || phase === 'demo');
-    _showLessonBubble(text, speaker, voiceId, showTapHint);
-  }
-
-  // --- 教学按钮高亮 ---
-  const _highlightedButtons = new Set(); // 当前高亮的按钮
-  let _buttonPulseTimer = null;
-
-  function _onLessonHighlightButton(e) {
-    const { button, highlight } = e.detail;
-    const btnId = 'btn-' + button; // 如 btn-note
-    const btn = document.getElementById(btnId);
-    // PC 端按钮同步
-    const pcBtnId = 'pc-btn-' + button;
-    const pcBtn = document.getElementById(pcBtnId);
-
-    if (highlight) {
-      _highlightedButtons.add(btnId);
-      // 添加脉冲高亮样式
-      if (btn) {
-        btn.style.transition = 'box-shadow 0.3s, transform 0.3s';
-        btn.style.boxShadow = '0 0 0 3px rgba(251, 191, 36, 0.6), 0 0 20px rgba(251, 191, 36, 0.4)';
-        btn.style.transform = 'scale(1.1)';
-        // 脉冲动画
-        _startButtonPulse(btn);
-      }
-      // PC 端同步高亮
-      if (pcBtn) {
-        pcBtn.style.transition = 'box-shadow 0.3s, transform 0.3s';
-        pcBtn.style.boxShadow = '0 0 0 3px rgba(251, 191, 36, 0.6), 0 0 20px rgba(251, 191, 36, 0.4)';
-        pcBtn.style.transform = 'scale(1.1)';
-        _startButtonPulse(pcBtn);
-      }
-    } else {
-      _highlightedButtons.delete(btnId);
-      if (btn) {
-        btn.style.boxShadow = '';
-        btn.style.transform = '';
-        _stopButtonPulse(btn);
-      }
-      // PC 端同步取消高亮
-      if (pcBtn) {
-        pcBtn.style.boxShadow = '';
-        pcBtn.style.transform = '';
-        _stopButtonPulse(pcBtn);
-      }
-    }
-  }
-
-  function _startButtonPulse(btn) {
-    if (btn._pulseInterval) return;
-    let scaleUp = true;
-    btn._pulseInterval = setInterval(() => {
-      scaleUp = !scaleUp;
-      btn.style.transform = scaleUp ? 'scale(1.1)' : 'scale(1.05)';
-    }, 600);
-  }
-
-  function _stopButtonPulse(btn) {
-    if (btn._pulseInterval) {
-      clearInterval(btn._pulseInterval);
-      btn._pulseInterval = null;
-    }
-  }
-
-  function _clearAllButtonHighlights() {
-    _highlightedButtons.forEach(btnId => {
-      const btn = document.getElementById(btnId);
-      if (btn) {
-        btn.style.boxShadow = '';
-        btn.style.transform = '';
-        _stopButtonPulse(btn);
-      }
-      // 同步清理 PC 端按钮
-      const pcBtnId = 'pc-' + btnId;
-      const pcBtn = document.getElementById(pcBtnId);
-      if (pcBtn) {
-        pcBtn.style.boxShadow = '';
-        pcBtn.style.transform = '';
-        _stopButtonPulse(pcBtn);
-      }
-    });
-    _highlightedButtons.clear();
-  }
-
-  // --- 教学气泡 ---
-  function _showLessonBubble(text, speaker, voiceId, showTapHint) {
-    if (!lessonBubble) {
-      lessonBubble = document.createElement('div');
-      lessonBubble.id = 'lesson-bubble';
-      lessonBubble.style.cssText = `
-        position: absolute;
-        bottom: 160px;
-        left: 50%;
-        transform: translateX(-50%);
-        background:
-          repeating-linear-gradient(
-            45deg,
-            transparent 0px,
-            transparent 3px,
-            rgba(0, 0, 0, 0.04) 3px,
-            rgba(0, 0, 0, 0.04) 4px
-          ),
-          linear-gradient(180deg, rgba(60, 48, 38, 0.95) 0%, rgba(45, 36, 28, 0.98) 100%);
-        color: #f0d890;
-        padding: 14px 22px;
-        border-radius: 10px;
-        border: 1.5px solid #c9a84c;
-        box-shadow:
-          inset 0 1px 0 rgba(201, 168, 76, 0.3),
-          0 4px 16px rgba(0, 0, 0, 0.5);
-        font-size: 14px;
-        line-height: 1.6;
-        max-width: 85%;
-        z-index: 500;
-        text-align: center;
-        opacity: 0;
-        transition: opacity 0.3s;
-        cursor: pointer;
-        white-space: pre-wrap;
-        letter-spacing: 0.3px;
-      `;
-      // 气泡小三角（指向下方工具栏）
-      const arrow = document.createElement('div');
-      arrow.style.cssText = `
-        position: absolute;
-        bottom: -9px;
-        left: 50%;
-        transform: translateX(-50%) rotate(45deg);
-        width: 16px;
-        height: 16px;
-        background: linear-gradient(135deg, transparent 50%, rgba(45, 36, 28, 0.98) 50%);
-        border-right: 1.5px solid #c9a84c;
-        border-bottom: 1.5px solid #c9a84c;
-      `;
-      lessonBubble.appendChild(arrow);
-
-      // 点击气泡快进教学
-      lessonBubble.addEventListener('click', () => {
-        if (lessonPlayer && lessonPlayer.isActive) {
-          const phase = lessonPlayer.currentPhase;
-          if (phase === 'intro' || phase === 'demo') {
-            lessonPlayer.advance();
-          }
-        }
-      });
-
-      const gameContainer = document.getElementById('game-container') || document.body;
-      gameContainer.appendChild(lessonBubble);
-    }
-
-    // 保留三角箭头元素，只更新文本内容
-    const arrow = lessonBubble.querySelector('div');
-    lessonBubble.textContent = text;
-    if (arrow) lessonBubble.appendChild(arrow);
-
-    lessonBubble.style.opacity = '1';
-
-    // 显示/隐藏"点击继续"提示
-    if (showTapHint) {
-      _showLessonTapHint();
-    } else {
-      _hideLessonTapHint();
-    }
-
-    // 自动消失（根据文字长度计算时间）
-    if (lessonBubble._hideTimer) clearTimeout(lessonBubble._hideTimer);
-    const duration = Math.max(2000, text.length * 180); // 每字180ms，最少2秒
-    lessonBubble._hideTimer = setTimeout(() => {
-      if (lessonBubble) lessonBubble.style.opacity = '0';
-      _hideLessonTapHint();
-    }, duration);
-  }
-
-  // "点击屏幕继续"闪烁提示
-  let _lessonTapHint = null;
-  let _lessonTapBlinkTimer = null;
-
-  function _showLessonTapHint() {
-    if (!_lessonTapHint) {
-      _lessonTapHint = document.createElement('div');
-      _lessonTapHint.style.cssText = `
-        position: absolute;
-        bottom: 60px;
-        left: 50%;
-        transform: translateX(-50%);
-        color: rgba(255, 255, 255, 0.8);
-        font-size: 12px;
-        padding: 6px 14px;
-        background: rgba(0, 0, 0, 0.3);
-        border-radius: 20px;
-        z-index: 499;
-        pointer-events: none;
-        animation: lesson-tap-blink 1.5s ease-in-out infinite;
-      `;
-      _lessonTapHint.textContent = '👆 点击屏幕继续';
-      // 添加动画样式
-      if (!document.getElementById('lesson-tap-animation')) {
-        const style = document.createElement('style');
-        style.id = 'lesson-tap-animation';
-        style.textContent = `
-          @keyframes lesson-tap-blink {
-            0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
-            50% { opacity: 1; transform: translateX(-50%) scale(1.05); }
-          }
-        `;
-        document.head.appendChild(style);
-      }
-      const gameContainer = document.getElementById('game-container') || document.body;
-      gameContainer.appendChild(_lessonTapHint);
-    }
-    _lessonTapHint.style.opacity = '1';
-  }
-
-  function _hideLessonTapHint() {
-    if (_lessonTapHint) {
-      _lessonTapHint.style.opacity = '0';
-    }
-  }
-
-  function _hideLessonBubble() {
-    if (lessonBubble) {
-      lessonBubble.style.opacity = '0';
-    }
-  }
-
-  // --- 跳过按钮 ---
-  function _showLessonSkipBtn() {
-    if (!lessonSkipBtn) {
-      lessonSkipBtn = document.createElement('button');
-      lessonSkipBtn.id = 'lesson-skip-btn';
-      lessonSkipBtn.textContent = '跳过教学 →';
-      lessonSkipBtn.style.cssText = `
-        position: absolute;
-        top: 56px;
-        right: 12px;
-        background: linear-gradient(180deg, rgba(60, 48, 38, 0.9) 0%, rgba(45, 36, 28, 0.95) 100%);
-        color: #c4b5a0;
-        border: 1px solid rgba(201, 168, 76, 0.5);
-        padding: 5px 14px;
-        border-radius: 6px;
-        font-size: 12px;
-        font-weight: 500;
-        cursor: pointer;
-        z-index: 501;
-        box-shadow:
-          inset 0 1px 0 rgba(201, 168, 76, 0.2),
-          0 2px 8px rgba(0, 0, 0, 0.3);
-        transition: all 0.2s;
-        letter-spacing: 0.5px;
-      `;
-      lessonSkipBtn.addEventListener('mouseenter', () => {
-        lessonSkipBtn.style.background = 'linear-gradient(180deg, rgba(75, 60, 48, 0.95) 0%, rgba(55, 44, 34, 0.98) 100%)';
-        lessonSkipBtn.style.color = '#f0d890';
-        lessonSkipBtn.style.borderColor = 'rgba(201, 168, 76, 0.7)';
-      });
-      lessonSkipBtn.addEventListener('mouseleave', () => {
-        lessonSkipBtn.style.background = 'linear-gradient(180deg, rgba(60, 48, 38, 0.9) 0%, rgba(45, 36, 28, 0.95) 100%)';
-        lessonSkipBtn.style.color = '#c4b5a0';
-        lessonSkipBtn.style.borderColor = 'rgba(201, 168, 76, 0.5)';
-      });
-      lessonSkipBtn.addEventListener('click', () => {
-        if (lessonPlayer) {
-          lessonPlayer.skip();
-        }
-      });
-      const gameContainer = document.getElementById('game-container') || document.body;
-      gameContainer.appendChild(lessonSkipBtn);
-    }
-    lessonSkipBtn.style.display = 'block';
-  }
-
-  function _hideLessonSkipBtn() {
-    if (lessonSkipBtn) {
-      lessonSkipBtn.style.display = 'none';
-    }
-  }
-
-  // --- 玩家输入拦截（用于 guided 阶段） ---
   function _lessonHandleCellFill(r, c, num) {
-    if (!lessonPlayer || !lessonPlayer.isActive) return null;
-    if (!lessonPlayer.isWaitingInput) return null;
-
-    const result = lessonPlayer.handleCellFill(r, c, num);
-    if (!result.handled) return null;
-
-    if (result.correct === true) {
-      // 正确：额外播正确音效（填数本身由后面的通用逻辑处理）
-      AudioService.sfx.play('fill_correct');
-      if (renderer && typeof renderer.triggerFillAnimation === 'function') {
-        renderer.triggerFillAnimation(r, c, 300);
-      }
-      updateNumBtnCompletedState();
-      // 不在这里 checkCompletion，等通用逻辑处理
-    } else if (result.correct === false) {
-      // 错误：额外播错误音效 + 教学提示（填数本身由后面的通用逻辑处理）
-      AudioService.sfx.play('fill_wrong');
-      errorCount++;
-    }
-
-    return result;
+    if (!lessonUICoordinator) return null;
+    return lessonUICoordinator.handleCellFill(r, c, num);
   }
 
   async function startLevel(levelId) {
@@ -869,33 +522,12 @@
   function setupChapterSelect() {
     if (!global.ChapterSelect) return;
 
+    // === 第七阶段抽离：初始化成就/印章协调器 ===
+    _initAchievementCoordinator();
+
     // 设置成就解锁回调
-    if (global.ProgressManager) {
-      ProgressManager.onAchievementUnlock(function(achievement) {
-        // 印章盖印动画（优先显示，如果 SealAnimation 可用）
-        if (global.SealAnimationInstance && typeof SealAnimationInstance.show === 'function') {
-          SealAnimationInstance.show(achievement);
-        }
-        // Toast 通知（备用，如果没有印章动画或作为补充）
-        showAchievementToast(achievement);
-        // 刷新成就面板
-        if (achievementPanel) {
-          try { achievementPanel.refresh(); } catch (e) {}
-        }
-      });
-    }
-
-    // 初始化成就面板
-    if (global.AchievementPanel) {
-      achievementPanel = new AchievementPanel();
-    }
-
-    // 初始化图鉴面板
-    if (global.GalleryPanel) {
-      galleryPanel = new GalleryPanel();
-      // 暴露 UI 控制函数到全局，供图鉴剧情回放使用
-      global.setUIVisible = setUIVisible;
-      global.setInteractionLocked = setInteractionLocked;
+    if (achievementCoordinator) {
+      achievementCoordinator.setupAchievementCallback();
     }
 
     chapterSelect = new ChapterSelect({
@@ -925,6 +557,41 @@
 
     // 初始化游戏流程控制器（第四阶段抽离）
     _initGameController();
+  }
+
+  // === 第七阶段抽离：成就/印章协调器初始化 ===
+  function _initAchievementCoordinator() {
+    if (!AchievementCoordinator) return;
+    if (achievementCoordinator) return;
+
+    achievementCoordinator = new AchievementCoordinator({
+      getNameToChar: () => NAME_TO_CHAR,
+      getBoard: () => board,
+      getChapterData: () => currentChapterData,
+      getLevelData: () => currentLevelData,
+      getChapterSelect: () => chapterSelect,
+      getUsedNotes: () => usedNotes,
+      setUIVisible: setUIVisible,
+      setInteractionLocked: setInteractionLocked,
+      vibrate: (presetName) => {
+        if (presetName === 'CLIMAX') vibrate(VIBRATE_PRESETS.CLIMAX);
+        else if (VIBRATE_PRESETS[presetName]) vibrate(VIBRATE_PRESETS[presetName]);
+      },
+    });
+
+    // 初始化面板
+    achievementCoordinator.initAchievementPanel();
+    achievementCoordinator.initGalleryPanel();
+
+    // 向后兼容：全局暴露面板引用
+    Object.defineProperty(global, 'guideAchievementPanel', {
+      get: function() { return achievementCoordinator ? achievementCoordinator.achievementPanel : null; },
+      configurable: true,
+    });
+    Object.defineProperty(global, 'guideGalleryPanel', {
+      get: function() { return achievementCoordinator ? achievementCoordinator.galleryPanel : null; },
+      configurable: true,
+    });
   }
 
   // === GameController 初始化（第四阶段抽离） ===
@@ -970,6 +637,22 @@
       global.comboUI = comboUI;
     }
 
+    // === 第七阶段抽离：初始化剧情编排器 ===
+    if (StoryOrchestrator) {
+      StoryOrchestrator.init({
+        storyEngine: storyEngine,
+        galleryPanel: achievementCoordinator ? achievementCoordinator.galleryPanel : null,
+        renderer: renderer,
+        board: board,
+        AudioService: AudioService,
+        getCurrentLevelData: () => currentLevelData,
+        getCurrentChapterData: () => currentChapterData,
+        getCurrentLevelId: () => currentLevelId,
+        setUIVisible: setUIVisible,
+        setInteractionLocked: setInteractionLocked,
+      });
+    }
+
     gameController = new GameController({
       // 系统对象
       LevelLoader: LevelLoader,
@@ -1005,11 +688,11 @@
       hintSystem: hintSystem,
       gameTimer: gameTimer,
       chapterSelect: chapterSelect,
-      achievementPanel: achievementPanel,
+      achievementPanel: achievementCoordinator ? achievementCoordinator.achievementPanel : null,
       settingsPanel: settingsPanel,
-      galleryPanel: galleryPanel,
+      galleryPanel: achievementCoordinator ? achievementCoordinator.galleryPanel : null,
       techMatrix: techMatrix,
-      lessonPlayer: lessonPlayer,
+      lessonPlayer: null, // 教学引导由 lessonUICoordinator 管理
       whatIfManager: null, // 稍后设置
 
       // 回调
@@ -1142,148 +825,25 @@
     }
   }
 
-  // === Unlock Characters from Dialog ===
+  // ============================================================
+  //  剧情编排（第七阶段抽离至 story/StoryOrchestrator.js）
+  // ============================================================
+  //  向后兼容：所有剧情编排函数转发到 StoryOrchestrator
+
   function unlockCharactersFromDialog(dialogLines) {
-    if (!galleryPanel || !dialogLines || !Array.isArray(dialogLines)) return;
-
-    dialogLines.forEach(line => {
-      if (!line.speaker) return;
-      const charId = NAME_TO_CHAR[line.speaker];
-      if (charId) {
-        galleryPanel.unlockCharacter(charId);
-      }
-    });
+    return StoryOrchestrator.unlockCharactersFromDialog(dialogLines);
   }
-
-  // === Unlock Backgrounds from Dialog ===
   function unlockBackgroundsFromDialog(dialogLines) {
-    if (!galleryPanel || !dialogLines || !Array.isArray(dialogLines)) return;
-
-    dialogLines.forEach(line => {
-      if (line.bg) {
-        // 提取背景文件名（去掉路径和扩展名）
-        let bgName = line.bg;
-        if (bgName.startsWith('assets/')) {
-          bgName = bgName.substring(bgName.lastIndexOf('/') + 1);
-        }
-        galleryPanel.unlockBackground(bgName);
-      }
-    });
+    return StoryOrchestrator.unlockBackgroundsFromDialog(dialogLines);
   }
-
-  // === Unlock Single Background ===
   function unlockBackground(bgPath) {
-    if (!galleryPanel || !bgPath) return;
-    let bgName = bgPath;
-    if (bgName.startsWith('assets/')) {
-      bgName = bgName.substring(bgName.lastIndexOf('/') + 1);
-    }
-    galleryPanel.unlockBackground(bgName);
+    return StoryOrchestrator.unlockBackground(bgPath);
   }
-
-  // === Play Pre-Dialog ===
-  // 各章节默认背景图（用于preDialog没有设置bg时的兜底）
-  const CHAPTER_DEFAULT_BG = {
-    1: 'assets/images/backgrounds/bg_scene1_single_door_v2.jpg',
-    2: 'assets/images/backgrounds/bg_scene13.jpg',
-    3: 'assets/images/backgrounds/bg_scene23.jpg',
-    4: 'assets/images/backgrounds/bg_scene32.jpg',
-    5: 'assets/images/backgrounds/bg_scene40.jpg',
-    6: 'assets/images/backgrounds/bg_scene48.jpg',
-    7: 'assets/images/backgrounds/bg_scene56.jpg',
-    8: 'assets/images/backgrounds/bg_scene63.jpg',
-  };
-
   function playPreDialog() {
-    return new Promise((resolve) => {
-      if (!storyEngine || !currentLevelData) {
-        resolve();
-        return;
-      }
-
-      const preDialog = currentLevelData.preDialog || [];
-      if (preDialog.length === 0) {
-        resolve();
-        return;
-      }
-
-      // 解锁出现的角色
-      unlockCharactersFromDialog(preDialog);
-
-      // 解锁对话中出现的背景
-      unlockBackgroundsFromDialog(preDialog);
-
-      // 设置场景键，用于已读剧情记录
-      const chapterId = currentChapterData ? currentChapterData.chapterId : 0;
-      storyEngine.setSceneKey(chapterId + '_' + currentLevelId + '_pre');
-
-      // 如果对话中没有设置背景，且当前没有背景，则设置章节默认背景
-      const hasBgInDialog = preDialog.some(line => line.bg);
-      const hasCurrentBg = storyEngine._currentBg;
-      if (!hasBgInDialog && !hasCurrentBg && CHAPTER_DEFAULT_BG[chapterId]) {
-        storyEngine._changeBg(CHAPTER_DEFAULT_BG[chapterId]);
-        // 解锁章节默认背景
-        unlockBackground(CHAPTER_DEFAULT_BG[chapterId]);
-      }
-
-      // Hide game UI during story
-      setUIVisible(false);
-
-      log.info('Playing pre-dialog (%d lines)', preDialog.length);
-      storyEngine.sayLines(preDialog, () => {
-        setUIVisible(true);
-        setInteractionLocked(false);
-        // 标记剧情已读（图鉴用）
-        if (galleryPanel) {
-          galleryPanel.markSceneRead(chapterId, currentLevelId, 'pre');
-        }
-        resolve();
-      });
-    });
+    return StoryOrchestrator.playPreDialog();
   }
-
-  // === Play Prologue ===
   function playPrologue() {
-    return new Promise((resolve) => {
-      if (!storyEngine || !currentChapterData) {
-        resolve();
-        return;
-      }
-
-      const prologue = currentChapterData.prologue || currentChapterData.introStory || [];
-      if (prologue.length === 0) {
-        resolve();
-        return;
-      }
-
-      // 解锁出现的角色
-      unlockCharactersFromDialog(prologue);
-
-      // 解锁对话中出现的背景
-      unlockBackgroundsFromDialog(prologue);
-
-      // 设置场景键，用于已读剧情记录
-      const chapterId = currentChapterData.chapterId;
-      storyEngine.setSceneKey(chapterId + '_prologue');
-
-      // Hide game UI during story
-      setUIVisible(false);
-
-      // Start BGM - intro.mp3 for prologue
-      AudioService.bgm.playFile('intro.mp3');
-
-      log.info('Playing prologue (%d lines)', prologue.length);
-      storyEngine.sayLines(prologue, () => {
-        // Show game UI after story
-        setUIVisible(true);
-        setInteractionLocked(false);
-        // 标记剧情已读（图鉴用）
-        if (galleryPanel) {
-          galleryPanel.markSceneRead(chapterId, 0, 'prologue');
-        }
-        resolve();
-      });
-    });
+    return StoryOrchestrator.playPrologue();
   }
 
   function isFirstLevelOfChapter() {
@@ -1533,6 +1093,11 @@
       bossCoordinator.setLevelData(currentLevelData);
       bossCoordinator.setChapterData(currentChapterData);
       bossCoordinator.setGameController(gameController);
+    }
+    // 同步到 StoryOrchestrator（第七阶段抽离）
+    if (StoryOrchestrator) {
+      StoryOrchestrator.setBoard(board);
+      StoryOrchestrator.setRenderer(renderer);
     }
     // 绑定连击 UI 到 comboSystem（第六阶段抽离）
     if (comboUI && gameController.comboSystem) {
@@ -2886,70 +2451,18 @@
 
   /**
    * Play first-encounter teaching dialogue with full StoryEngine presentation.
-   * Shows character portrait + typewriter dialogue, then re-highlights target.
+   * 第七阶段抽离至 story/StoryOrchestrator.js
    */
   function playFirstEncounterTeaching(dialogLines, characterId, techniqueName, targetCells) {
-    if (!storyEngine || !dialogLines || dialogLines.length === 0) return;
-
-    log.info('Playing first encounter teaching:', techniqueName, characterId);
-
-    // Disable interaction during teaching
-    setInteractionLocked(true);
-
-    // Show teaching badge/title briefly
-    showTeachingBadge(techniqueName);
-
-    // Use StoryEngine for full dialogue experience
-    // Shorten to 2-3 lines for first encounter (keep it snappy)
-    const shortLines = dialogLines.slice(0, Math.min(3, dialogLines.length));
-
-    setTimeout(() => {
-      // 设置场景键，用于已读剧情记录
-      const chapterId = currentChapterData ? currentChapterData.chapterId : 0;
-      const techKey = (techniqueName || 'unknown').replace(/\s+/g, '_');
-      storyEngine.setSceneKey(chapterId + '_' + currentLevelId + '_tech_' + techKey);
-
-      storyEngine.sayLines(shortLines, () => {
-        // Re-highlight hint target after teaching ends
-        if (renderer && typeof renderer.clearHintHighlights === 'function') {
-          renderer.clearHintHighlights('hint');
-          if (targetCells && targetCells.length > 0 && typeof renderer.highlightHintCells === 'function') {
-            renderer.highlightHintCells(targetCells, 'hint', 'hint');
-          }
-          renderer.render(board);
-        }
-        setInteractionLocked(false);
-        log.info('First encounter teaching complete:', techniqueName);
-      });
-    }, 800);
+    return StoryOrchestrator.playFirstEncounterTeaching(dialogLines, characterId, techniqueName, targetCells);
   }
 
   /**
    * Show a brief "new technique discovered" badge.
+   * 第七阶段抽离至 story/StoryOrchestrator.js
    */
   function showTeachingBadge(techniqueName) {
-    const badge = document.createElement('div');
-    badge.style.cssText = 'position:fixed;top:30%;left:50%;transform:translate(-50%,-50%) scale(0.8);' +
-      'background:linear-gradient(135deg,rgba(251,191,36,0.2),rgba(15,23,42,0.95));' +
-      'border:2px solid rgba(251,191,36,0.6);border-radius:16px;' +
-      'padding:20px 40px;z-index:9998;text-align:center;' +  // 低于 overlay 层级
-      'opacity:0;transition:all 0.5s cubic-bezier(0.4,0,0.2,1);' +
-      'pointer-events:none;backdrop-filter:blur(4px);';
-    badge.innerHTML =
-      '<div style="font-size:12px;color:#fbbf24;letter-spacing:4px;margin-bottom:8px;">✦ 新技巧发现 ✦</div>' +
-      '<div style="font-size:24px;font-weight:900;color:#fef3c7;text-shadow:0 0 20px rgba(251,191,36,0.5);">' +
-      (techniqueName || '新技巧') + '</div>';
-    document.body.appendChild(badge);
-
-    requestAnimationFrame(() => {
-      badge.style.opacity = '1';
-      badge.style.transform = 'translate(-50%,-50%) scale(1)';
-    });
-    setTimeout(() => {
-      badge.style.opacity = '0';
-      badge.style.transform = 'translate(-50%,-50%) scale(0.9)';
-      setTimeout(() => badge.remove(), 500);
-    }, 700);
+    return StoryOrchestrator._showTeachingBadge(techniqueName);
   }
 
   /**
@@ -5641,38 +5154,9 @@
   }
 
   // === Play Clear Dialog ===
+  // 第七阶段抽离至 story/StoryOrchestrator.js
   function playClearDialog(callback) {
-    if (!storyEngine || !currentLevelData) {
-      if (callback) callback();
-      return;
-    }
-
-    const clearDialog = currentLevelData.clearDialog || [];
-    if (clearDialog.length === 0) {
-      if (callback) callback();
-      return;
-    }
-
-    // 解锁出现的角色
-    unlockCharactersFromDialog(clearDialog);
-
-    // 解锁对话中出现的背景
-    unlockBackgroundsFromDialog(clearDialog);
-
-    // 设置场景键，用于已读剧情记录
-    const chapterId = currentChapterData ? currentChapterData.chapterId : 0;
-    storyEngine.setSceneKey(chapterId + '_' + currentLevelId + '_clear');
-
-    setUIVisible(false);
-    log.info('Playing clear dialog (%d lines)', clearDialog.length);
-    storyEngine.sayLines(clearDialog, () => {
-      setUIVisible(true);
-      // 标记剧情已读（图鉴用）
-      if (galleryPanel) {
-        galleryPanel.markSceneRead(chapterId, currentLevelId, 'clear');
-      }
-      if (callback) callback();
-    });
+    return StoryOrchestrator.playClearDialog(callback);
   }
 
   // === Next Level ===
@@ -5734,39 +5218,9 @@
   }
 
   // === Chapter Epilogue ===
+  // 第七阶段抽离至 story/StoryOrchestrator.js
   function playChapterEpilogue(callback) {
-    if (!storyEngine || !currentChapterData) {
-      if (callback) callback();
-      return;
-    }
-
-    const epilogue = currentChapterData.epilogue || currentChapterData.endingStory || [];
-    if (epilogue.length === 0) {
-      if (callback) callback();
-      return;
-    }
-
-    // 解锁对话中出现的角色和背景
-    unlockCharactersFromDialog(epilogue);
-    unlockBackgroundsFromDialog(epilogue);
-
-    // 设置场景键，用于已读剧情记录
-    const chapterId = currentChapterData.chapterId;
-    storyEngine.setSceneKey(chapterId + '_epilogue');
-
-    // Hide completion overlay and game UI
-    const overlay = document.getElementById('complete-overlay');
-    if (overlay) overlay.style.display = 'none';
-    setUIVisible(false);
-
-    log.info('Playing chapter epilogue (%d lines)', epilogue.length);
-    storyEngine.sayLines(epilogue, () => {
-      // 标记剧情已读（图鉴用）
-      if (galleryPanel) {
-        galleryPanel.markSceneRead(chapterId, 0, 'epilogue');
-      }
-      if (callback) callback();
-    });
+    return StoryOrchestrator.playChapterEpilogue(callback);
   }
 
   // === Chapter Transition Screen ===
