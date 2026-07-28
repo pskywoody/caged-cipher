@@ -4,6 +4,31 @@
 ;(function(global) {
   'use strict';
 
+  /* ============================================================
+     Z-INDEX 层级宪章（与 guide.html :root CSS 变量保持一致）
+     背景(0) < 棋盘(10) < 覆盖层/高亮(20) < 浮条/HUD(100)
+     < 提示气泡(500) < 角色气泡(800) < Toast(2000)
+     < 遮罩/弹窗(10000+) < 对话(15000) < 高潮(20000)
+     < 成就(25000) < 暂停(28000) < 转场(30000) < 结局(35000)
+     ============================================================ */
+  const Z_INDEX = {
+    BG: 0,
+    BOARD: 10,
+    BOARD_OVERLAY: 20,
+    HUD: 100,
+    FLOATING_BAR: 100,
+    HINT_BUBBLE: 500,
+    CHAR_BUBBLE: 800,
+    TOAST: 2000,
+    OVERLAY: 10000,
+    DIALOG: 15000,
+    CLIMAX: 20000,
+    ACHIEVEMENT: 25000,
+    PAUSE: 28000,
+    TRANSITION: 30000,
+    ENDING: 35000
+  };
+
   const log = new Logger('Guide');
 
   // === chapters.json 缓存 ===
@@ -888,7 +913,7 @@
         font-size: 14px;
         line-height: 1.6;
         max-width: 85%;
-        z-index: 100;
+        z-index: 500;
         text-align: center;
         opacity: 0;
         transition: opacity 0.3s;
@@ -965,7 +990,7 @@
         padding: 6px 14px;
         background: rgba(0, 0, 0, 0.3);
         border-radius: 20px;
-        z-index: 99;
+        z-index: 499;
         pointer-events: none;
         animation: lesson-tap-blink 1.5s ease-in-out infinite;
       `;
@@ -1018,7 +1043,7 @@
         font-size: 12px;
         font-weight: 500;
         cursor: pointer;
-        z-index: 101;
+        z-index: 501;
         box-shadow:
           inset 0 1px 0 rgba(201, 168, 76, 0.2),
           0 2px 8px rgba(0, 0, 0, 0.3);
@@ -1488,6 +1513,88 @@
     hard:   { speed: 0.7, mistake: 0.5, intercept: 1.5, discovery: 1.2 },  // 困难：AI快，失误少
   };
 
+  /**
+   * 应用Boss战主题色到CSS变量
+   * 根据Boss配置的color字段动态调整整体UI色调
+   */
+  function _applyBossTheme(bossConfig) {
+    const root = document.documentElement;
+    if (!root) return;
+
+    const bossColor = bossConfig.color || '#ef4444';
+
+    // 将hex颜色转换为rgba的辅助函数
+    function hexToRgba(hex, alpha) {
+      const h = hex.replace('#', '');
+      const r = parseInt(h.substring(0, 2), 16);
+      const g = parseInt(h.substring(2, 4), 16);
+      const b = parseInt(h.substring(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    // 计算颜色的深浅变体
+    function lightenHex(hex, amount) {
+      const h = hex.replace('#', '');
+      let r = parseInt(h.substring(0, 2), 16);
+      let g = parseInt(h.substring(2, 4), 16);
+      let b = parseInt(h.substring(4, 6), 16);
+      r = Math.min(255, Math.floor(r + (255 - r) * amount));
+      g = Math.min(255, Math.floor(g + (255 - g) * amount));
+      b = Math.min(255, Math.floor(b + (255 - b) * amount));
+      return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+
+    function darkenHex(hex, amount) {
+      const h = hex.replace('#', '');
+      let r = parseInt(h.substring(0, 2), 16);
+      let g = parseInt(h.substring(2, 4), 16);
+      let b = parseInt(h.substring(4, 6), 16);
+      r = Math.max(0, Math.floor(r * (1 - amount)));
+      g = Math.max(0, Math.floor(g * (1 - amount)));
+      b = Math.max(0, Math.floor(b * (1 - amount)));
+      return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+
+    const bossLight = lightenHex(bossColor, 0.3);
+    const bossDark = darkenHex(bossColor, 0.2);
+    const bossBg = hexToRgba(bossColor, 0.15);
+    const bossBorder = hexToRgba(bossColor, 0.5);
+    const bossHudBg = hexToRgba(bossColor, 0.08);
+
+    // 应用Boss主题变量
+    root.style.setProperty('--boss-accent', bossColor);
+    root.style.setProperty('--boss-accent-light', bossLight);
+    root.style.setProperty('--boss-accent-dark', bossDark);
+    root.style.setProperty('--boss-bg', bossBg);
+    root.style.setProperty('--boss-border', bossBorder);
+    root.style.setProperty('--boss-hud-bg', bossHudBg);
+
+    // 给body添加boss-mode类，触发过渡动画
+    document.body.classList.add('boss-mode');
+  }
+
+  /**
+   * 重置Boss战主题，恢复普通主题
+   */
+  function _resetBossTheme() {
+    const root = document.documentElement;
+    if (!root) return;
+
+    // 移除boss-mode类，触发过渡动画
+    document.body.classList.remove('boss-mode');
+
+    // 延迟清除CSS变量（等待过渡动画完成）
+    setTimeout(() => {
+      // 恢复为默认值（与:root中定义的一致）
+      root.style.setProperty('--boss-accent', '#ef4444');
+      root.style.setProperty('--boss-accent-light', '#f87171');
+      root.style.setProperty('--boss-accent-dark', '#dc2626');
+      root.style.setProperty('--boss-bg', 'rgba(127, 29, 29, 0.3)');
+      root.style.setProperty('--boss-border', 'rgba(239, 68, 68, 0.5)');
+      root.style.setProperty('--boss-hud-bg', 'rgba(30, 10, 10, 0.92)');
+    }, 400);
+  }
+
   function startBossBattle() {
     if (typeof GuideBattle === 'undefined' || !currentChapterData) return;
 
@@ -1501,6 +1608,9 @@
     currentBossConfig = bossConfig;
     bossBattleStarted = true;
     log.info('[Boss] Starting battle vs', bossConfig.name, '难度:', currentDifficulty);
+
+    // ===== 应用Boss战主题色到CSS变量 =====
+    _applyBossTheme(bossConfig);
 
     // 更新HUD
     const bossNameEl = document.getElementById('boss-hud-boss-name');
@@ -2056,6 +2166,9 @@
     // 隐藏HUD
     const hud = document.getElementById('boss-battle-hud');
     if (hud) hud.classList.remove('visible');
+
+    // ===== 恢复普通主题 =====
+    _resetBossTheme();
 
     // 清除HUD更新定时器
     if (GuideBattle._hudInterval) {
@@ -4020,26 +4133,54 @@
     }
 
     let toggled = false;
+    // P2: 记录切换前的状态，用于触发候选数动画
+    const animCells = [];
     if (hasSelection && board.selectedCells.length > 1) {
       // 多选模式：使用内置的批量切换笔记方法
+      // 先记录每个格子的状态
+      for (const sc of board.selectedCells) {
+        const cell = board.cells[sc.r][sc.c];
+        if (!cell.fixedNum && !cell.fillNum) {
+          animCells.push({ r: sc.r, c: sc.c, had: cell.candidates.has(num) });
+        }
+      }
       board.toggleCandidateForSelection(num);
       toggled = true;
     } else if (hasSingle) {
       // 单选模式：切换笔记
       const cell = board.cells[hasSingle.r][hasSingle.c];
       if (!cell.fixedNum && !cell.fillNum) {
+        const had = cell.candidates.has(num);
         board.toggleCandidate(num);
+        animCells.push({ r: hasSingle.r, c: hasSingle.c, had: had });
         toggled = true;
       } else if (cell.fillNum && !cell.fixedNum) {
         // 如果格子有填数，先清除填数再切换候选（上滑=强制笔记模式）
         board.eraseNumber();
         board.toggleCandidate(num);
+        animCells.push({ r: hasSingle.r, c: hasSingle.c, had: false });
         toggled = true;
       }
     } else if (hasSelection) {
       // 只有一个selectedCell时也用toggleCandidate
-      board.toggleCandidate(num);
-      toggled = true;
+      const sc = board.selectedCells[0];
+      const cell = board.cells[sc.r][sc.c];
+      if (!cell.fixedNum && !cell.fillNum) {
+        const had = cell.candidates.has(num);
+        board.toggleCandidate(num);
+        animCells.push({ r: sc.r, c: sc.c, had: had });
+        toggled = true;
+      }
+    }
+
+    // P2: 触发候选数切换动画
+    if (toggled && renderer && typeof renderer.triggerCandidateAnimation === 'function') {
+      for (const ac of animCells) {
+        // had=true 表示之前有，现在被移除了 → leave 动画
+        // had=false 表示之前没有，现在被添加了 → enter 动画
+        const animType = ac.had ? 'leave' : 'enter';
+        renderer.triggerCandidateAnimation(ac.r, ac.c, num, animType, 150);
+      }
     }
 
     if (!toggled) return;
@@ -4670,6 +4811,25 @@
     _beginProcessing();
     AudioService.sfx.play('erase');
 
+    // P2: 记录要擦除的数字，用于擦除动画
+    const erasedCells = [];
+    if (!noteMode) {
+      // 正常模式：记录被擦除的填数
+      if (board.selectedCells.length > 1) {
+        for (const sc of board.selectedCells) {
+          const cell = board.cells[sc.r][sc.c];
+          if (cell.fillNum) {
+            erasedCells.push({ r: sc.r, c: sc.c, value: cell.fillNum });
+          }
+        }
+      } else if (board.selectedCell) {
+        const cell = board.cells[board.selectedCell.r][board.selectedCell.c];
+        if (cell.fillNum) {
+          erasedCells.push({ r: board.selectedCell.r, c: board.selectedCell.c, value: cell.fillNum });
+        }
+      }
+    }
+
     // === 模式感知的擦除 ===
     // 笔记模式：只清除候选数（不清除填数）
     // 正常模式：清除填数（候选数也一起清除，保持棋盘干净）
@@ -4686,6 +4846,13 @@
         board.eraseSelection();
       } else if (board.selectedCell || (board.selectedCells.length === 1)) {
         board.eraseNumber();
+      }
+    }
+
+    // P2: 触发擦除动画
+    if (renderer && typeof renderer.triggerEraseAnimation === 'function') {
+      for (const ec of erasedCells) {
+        renderer.triggerEraseAnimation(ec.r, ec.c, ec.value, 180);
       }
     }
 
@@ -9519,7 +9686,7 @@
       overlay.style.left = '0';
       overlay.style.width = '100%';
       overlay.style.height = '100%';
-      overlay.style.zIndex = '100';
+      overlay.style.zIndex = '20';
       overlay.classList.add('climax-pc-mode');
     }
 
@@ -10839,11 +11006,51 @@
     }
   }
 
+  // === P2 微交互优化 · 统一弹窗管理工具 ===
+  let _modalStack = []; // 弹窗栈，用于多层弹窗时正确管理滚动锁定
+
+  function _lockBodyScroll() {
+    if (!document.body.classList.contains('modal-open')) {
+      document.body.classList.add('modal-open');
+      // 保存当前滚动位置
+      document.body.dataset.scrollTop = window.scrollY || document.documentElement.scrollTop;
+    }
+  }
+
+  function _unlockBodyScroll() {
+    if (_modalStack.length === 0) {
+      document.body.classList.remove('modal-open');
+      // 恢复滚动位置
+      const scrollTop = parseInt(document.body.dataset.scrollTop || '0');
+      if (scrollTop > 0) {
+        window.scrollTo(0, scrollTop);
+      }
+    }
+  }
+
+  function _pushModal(id) {
+    if (_modalStack.indexOf(id) === -1) {
+      _modalStack.push(id);
+      _lockBodyScroll();
+    }
+  }
+
+  function _popModal(id) {
+    const idx = _modalStack.indexOf(id);
+    if (idx !== -1) {
+      _modalStack.splice(idx, 1);
+      _unlockBodyScroll();
+    }
+  }
+
   function showPauseMenu() {
     if (isCompleted || isPaused) return;
     if (!board) return; // 棋盘未初始化时不暂停
 
     isPaused = true;
+
+    // P2: 锁定背景滚动
+    _pushModal('pause');
 
     // 暂停计时器
     if (gameTimer && typeof gameTimer.pause === 'function') {
@@ -10881,6 +11088,9 @@
   function hidePauseMenu() {
     if (!isPaused) return;
     isPaused = false;
+
+    // P2: 解锁背景滚动（延迟到动画结束后）
+    _popModal('pause');
 
     const overlay = document.getElementById('pause-overlay');
     if (overlay) {

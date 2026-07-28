@@ -322,6 +322,15 @@ class Renderer {
   constructor(canvasId) {
     this.canvas = document.getElementById(canvasId);
     this.ctx = this.canvas.getContext('2d');
+    // 字体渲染优化：启用抗锯齿和平滑渲染
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = 'high';
+    // 确保字体渲染清晰（textRendering在Canvas中通过font设置间接控制，
+    // 这里设置canvas CSS以优化显示）
+    if (this.canvas.style) {
+      this.canvas.style.textRendering = 'optimizeLegibility';
+      this.canvas.style.webkitFontSmoothing = 'antialiased';
+    }
     this.cellSize = 60;
     this._padding = 8;
     this._paddingTop = 10;
@@ -362,6 +371,12 @@ class Renderer {
     // 填数动画
     this._fillAnimations = new Map(); // key: "r,c", value: { startTime: number, duration: number }
     this._fillAnimationEnabled = true; // 是否启用填数动画
+    // P2: 擦除淡出动画
+    this._eraseAnimations = new Map(); // key: "r,c", value: { startTime: number, duration: number, value: number }
+    this._eraseAnimationEnabled = true;
+    // P2: 候选数切换动画
+    this._candidateAnimations = new Map(); // key: "r,c,num", value: { startTime, duration, type: 'enter'|'leave' }
+    this._candidateAnimationEnabled = true;
     this._animFrameId = null;          // requestAnimationFrame ID
     this._currentBoard = null;         // 当前 board 引用（用于动画循环）
     // ===== P2性能优化：rAF节流渲染 =====
@@ -2134,6 +2149,43 @@ class Renderer {
   }
 
   /**
+   * P2: 触发擦除淡出缩小动画
+   * @param {number} r - 行
+   * @param {number} c - 列
+   * @param {number} value - 被擦除的数字
+   * @param {number} duration - 动画时长（ms）
+   */
+  triggerEraseAnimation(r, c, value, duration = 180) {
+    if (!this._eraseAnimationEnabled) return;
+    const key = `${r},${c}`;
+    this._eraseAnimations.set(key, {
+      startTime: Date.now(),
+      duration: duration,
+      value: value,
+    });
+    this.forceRender = true;
+  }
+
+  /**
+   * P2: 触发候选数切换动画
+   * @param {number} r - 行
+   * @param {number} c - 列
+   * @param {number} num - 候选数字
+   * @param {string} type - 'enter' | 'leave'
+   * @param {number} duration - 动画时长（ms）
+   */
+  triggerCandidateAnimation(r, c, num, type = 'enter', duration = 150) {
+    if (!this._candidateAnimationEnabled) return;
+    const key = `${r},${c},${num}`;
+    this._candidateAnimations.set(key, {
+      startTime: Date.now(),
+      duration: duration,
+      type: type,
+    });
+    this.forceRender = true;
+  }
+
+  /**
    * 启用/禁用填数动画
    * @param {boolean} enabled
    */
@@ -2161,6 +2213,47 @@ class Renderer {
       this._fillAnimations.delete(key);
     }
     return progress;
+  }
+
+  /**
+   * P2: 获取擦除动画进度（0~1，1表示完成）
+   * @param {number} r
+   * @param {number} c
+   * @returns {{progress: number, value: number}|null}
+   * @private
+   */
+  _getEraseAnimProgress(r, c) {
+    const key = `${r},${c}`;
+    const anim = this._eraseAnimations.get(key);
+    if (!anim) return null;
+    const elapsed = Date.now() - anim.startTime;
+    const progress = Math.min(1, elapsed / anim.duration);
+    if (progress >= 1) {
+      this._eraseAnimations.delete(key);
+      return null;
+    }
+    return { progress, value: anim.value };
+  }
+
+  /**
+   * P2: 获取候选数动画进度（0~1，1表示完成）
+   * @param {number} r
+   * @param {number} c
+   * @param {number} num
+   * @returns {{progress: number, type: string}|null}
+   * @private
+   */
+  _getCandidateAnimProgress(r, c, num) {
+    const key = `${r},${c},${num}`;
+    const anim = this._candidateAnimations.get(key);
+    if (!anim) return null;
+    const elapsed = Date.now() - anim.startTime;
+    const progress = Math.min(1, elapsed / anim.duration);
+    if (progress >= 1) {
+      this._candidateAnimations.delete(key);
+      return null;
+    }
+    return { progress, type: anim.type };
   }
 
   /**
@@ -3246,11 +3339,14 @@ class Renderer {
 
   /**
    * 将主题色应用到CSS变量（影响数字键盘、UI等）
+   * 同时更新章节主题变量，实现DOM层UI的主题化
    */
   _applyThemeCSS() {
     const t = this.theme;
     const root = document.documentElement;
     if (!root) return;
+
+    // ===== 主题核心变量（Canvas主题系统） =====
     root.style.setProperty('--theme-accent', t.accent);
     root.style.setProperty('--theme-accent-dark', t.accentDark);
     root.style.setProperty('--theme-accent-light', t.accentLight);
@@ -3269,6 +3365,42 @@ class Renderer {
     root.style.setProperty('--theme-fixed-num', t.fixedNum);
     root.style.setProperty('--theme-header-text', t.toolBarText);
     root.style.setProperty('--theme-header-bg', t.toolBarBg);
+
+    // ===== 章节主题变量（DOM层UI同步） =====
+    // 将accent颜色同步到章节主题变量，实现DOM UI跟随章节变化
+    const accent = t.accent;
+    const accentLight = t.accentLight;
+    const accentDark = t.accentDark;
+
+    // 辅助函数：hex转rgba
+    function _hexToRgba(hex, alpha) {
+      const h = (hex || '#c9a84c').replace('#', '');
+      const r = parseInt(h.substring(0, 2), 16);
+      const g = parseInt(h.substring(2, 4), 16);
+      const b = parseInt(h.substring(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    root.style.setProperty('--chapter-accent', accent);
+    root.style.setProperty('--chapter-accent-light', accentLight);
+    root.style.setProperty('--chapter-accent-dark', accentDark);
+    root.style.setProperty('--chapter-bg', t.bgPage);
+
+    // 派生的半透明颜色变量（用于边框、背景等）
+    root.style.setProperty('--chapter-border', _hexToRgba(accent, 0.4));
+    root.style.setProperty('--chapter-border-light', _hexToRgba(accent, 0.2));
+    root.style.setProperty('--chapter-bg-tint', _hexToRgba(accent, 0.1));
+    root.style.setProperty('--chapter-glow', _hexToRgba(accent, 0.25));
+
+    // 添加章节主题过渡类，实现平滑切换
+    document.body.classList.add('chapter-theme-transition');
+
+    // 在下一帧移除过渡类（防止每次操作都触发过渡）
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        document.body.classList.remove('chapter-theme-transition');
+      }, 400);
+    });
   }
 
   /**
@@ -3314,10 +3446,12 @@ class Renderer {
       }
     }
     if (!cssWidth || cssWidth < 10) {
-      cssWidth = 400;
+      // 响应式 fallback：使用视口宽度的 92%，上限 480px
+      cssWidth = Math.min(Math.floor(window.innerWidth * 0.92), 480);
     }
     if (!cssHeight || cssHeight < 10) {
-      cssHeight = 400;
+      // 响应式 fallback：使用视口高度的 60%（留空间给控制区），或与宽度取等
+      cssHeight = Math.min(cssWidth, Math.floor(window.innerHeight * 0.6));
     }
 
     // 检查尺寸是否真的变化了
@@ -3483,6 +3617,9 @@ class Renderer {
 
     // 动画循环管理：如果还有活跃的填数动画或粒子，继续下一帧
     const hasActiveAnimations = this._fillAnimationEnabled && this._fillAnimations.size > 0;
+    // P2: 擦除动画和候选数动画也需要驱动循环
+    const hasEraseAnimations = this._eraseAnimationEnabled && this._eraseAnimations.size > 0;
+    const hasCandidateAnimations = this._candidateAnimationEnabled && this._candidateAnimations.size > 0;
     const hasParticles = this._particleEnabled && this._particles.length > 0;
     const hasFakeCellEffects = this._fakeCellExposures.size > 0 || this._fakeCellFails.size > 0;
     const hasLockEffects = this._lockReleases.size > 0;
@@ -3504,7 +3641,8 @@ class Renderer {
     // P2优化：Boss战中幽灵格呼吸动画需要持续重绘
     const hasBossBattleBreathing = this._bossBattleActive && this._bossBattle &&
       (this._bossBattle.aiCount > 0 || this._bossBattle.playerCount > 0);
-    if (hasActiveAnimations || hasParticles || hasFakeCellEffects || hasLockEffects ||
+    if (hasActiveAnimations || hasEraseAnimations || hasCandidateAnimations ||
+        hasParticles || hasFakeCellEffects || hasLockEffects ||
         hasRegionLockEffects || hasRevealedNotes || hasCollapseEffects || hasGateAlerts ||
         hasGatePulse || hasAvalancheRays ||
         hasThreeActBorders || hasComboGlow || hasHintAnimation || hasBossBattleBreathing) {
@@ -4694,6 +4832,36 @@ class Renderer {
     ctx.font = `700 ${playerFontSize}px sans-serif`;
 
     const hasAnimations = this._fillAnimationEnabled && this._fillAnimations.size > 0;
+    const hasEraseAnims = this._eraseAnimationEnabled && this._eraseAnimations.size > 0;
+
+    // P2: 先绘制擦除动画中的数字（淡出缩小效果）
+    if (hasEraseAnims) {
+      for (const [key, anim] of this._eraseAnimations.entries()) {
+        const [r, c] = key.split(',').map(Number);
+        if (r < 0 || r >= size || c < 0 || c >= size) continue;
+        const eraseInfo = this._getEraseAnimProgress(r, c);
+        if (!eraseInfo) continue;
+        const { progress, value } = eraseInfo;
+
+        // 加速缓出：先快后慢
+        const ease = 1 - Math.pow(1 - progress, 2);
+        const scale = 1 - ease * 0.5; // 1 -> 0.5
+        const alpha = 1 - ease; // 1 -> 0
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        const centerX = c * cellSize + cellSize / 2;
+        const centerY = r * cellSize + cellSize / 2;
+        ctx.translate(centerX, centerY);
+        ctx.scale(scale, scale);
+        ctx.font = `700 ${playerFontSize}px sans-serif`;
+        ctx.fillStyle = theme.playerNum;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+        ctx.shadowBlur = 0;
+        ctx.fillText(String(value), 0, 0);
+        ctx.restore();
+      }
+    }
 
     for (let r = 0; r < size; r++) {
       for (let c = 0; c < size; c++) {
@@ -4825,6 +4993,17 @@ class Renderer {
       pulseOpacity = bossBattle.getPulseOpacity();
     }
 
+    // P2: 收集需要绘制离场动画的候选数字
+    const leaveAnims = [];
+    if (this._candidateAnimationEnabled && this._candidateAnimations.size > 0) {
+      for (const [key, anim] of this._candidateAnimations.entries()) {
+        if (anim.type === 'leave') {
+          const [r, c, numStr] = key.split(',');
+          leaveAnims.push({ r: +r, c: +c, num: +numStr, ...anim });
+        }
+      }
+    }
+
     for (let r = 0; r < size; r++) {
       for (let c = 0; c < size; c++) {
         const cell = board.cells[r][c];
@@ -4856,8 +5035,6 @@ class Renderer {
         const revealedNote = this._revealedNotes.get(key);
         const isRevealed = !!revealedNote;
 
-        ctx.globalAlpha = opacity;
-
         if (isRevealed) {
           // 浮现笔记：金色/青色发光效果
           const now = Date.now();
@@ -4886,8 +5063,61 @@ class Renderer {
             const subC = (num - 1) % boxW;
             const x = c * cellSize + paddingLeft + subC * subW + subW / 2;
             const y = r * cellSize + paddingTop + subR * subH + subH / 2;
-            ctx.fillText(num, x, y);
+
+            // P2: 检查进场动画
+            const animKey = `${r},${c},${num}`;
+            const anim = this._candidateAnimations.get(animKey);
+            if (anim && anim.type === 'enter') {
+              const progress = Math.min(1, (Date.now() - anim.startTime) / anim.duration);
+              const ease = 1 - Math.pow(1 - progress, 2); // ease-out
+              const scale = 0.6 + ease * 0.4; // 0.6 -> 1
+              const alpha = ease; // 0 -> 1
+
+              ctx.save();
+              ctx.globalAlpha = opacity * alpha;
+              ctx.translate(x, y);
+              ctx.scale(scale, scale);
+              ctx.fillText(num, 0, 0);
+              ctx.restore();
+
+              // 动画结束后移除
+              if (progress >= 1) {
+                this._candidateAnimations.delete(animKey);
+              }
+            } else {
+              ctx.globalAlpha = opacity;
+              ctx.fillText(num, x, y);
+            }
           });
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+
+    // P2: 绘制离场动画中的候选数（已被移除但仍在动画中）
+    if (leaveAnims.length > 0) {
+      ctx.fillStyle = theme.candidateNum;
+      for (const anim of leaveAnims) {
+        const progress = Math.min(1, (Date.now() - anim.startTime) / anim.duration);
+        const ease = progress * progress; // ease-in
+        const scale = 1 - ease * 0.4; // 1 -> 0.6
+        const alpha = 1 - ease; // 1 -> 0
+
+        const subR = Math.floor((anim.num - 1) / boxW);
+        const subC = (anim.num - 1) % boxW;
+        const x = anim.c * cellSize + paddingLeft + subC * subW + subW / 2;
+        const y = anim.r * cellSize + paddingTop + subR * subH + subH / 2;
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+        ctx.fillText(anim.num, 0, 0);
+        ctx.restore();
+
+        // 动画结束后移除
+        if (progress >= 1) {
+          this._candidateAnimations.delete(`${anim.r},${anim.c},${anim.num}`);
         }
       }
     }

@@ -41,6 +41,13 @@
         this._buildDOM();
       }
 
+      // P2: 锁定背景滚动
+      if (typeof _pushModal === 'function') {
+        _pushModal('achievement');
+      } else {
+        document.body.classList.add('modal-open');
+      }
+
       this.refresh();
       this._container.style.display = 'flex';
       requestAnimationFrame(() => {
@@ -52,6 +59,13 @@
     hide() {
       if (!this._isVisible) return;
       this._isVisible = false;
+
+      // P2: 解锁背景滚动
+      if (typeof _popModal === 'function') {
+        _popModal('achievement');
+      } else {
+        document.body.classList.remove('modal-open');
+      }
 
       if (this._container) {
         this._container.style.opacity = '0';

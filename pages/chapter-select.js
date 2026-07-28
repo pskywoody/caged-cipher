@@ -1235,7 +1235,7 @@
     }
 
     // 显示章节选择
-    show() {
+    async show() {
       if (this._isVisible) return;
       this._isVisible = true;
       ProgressManager.load();
@@ -1244,10 +1244,13 @@
         this._buildDOM();
       }
 
-      // 检查隐藏关和真结局解锁
-      this._checkAllUnlocks();
+      // P2: 锁定背景滚动
+      if (typeof _pushModal === 'function') {
+        _pushModal('chapterSelect');
+      } else {
+        document.body.classList.add('modal-open');
+      }
 
-      this._render();
       const overlay = document.getElementById('chapter-select-overlay');
       if (overlay) {
         overlay.style.display = 'flex';
@@ -1257,12 +1260,44 @@
           overlay.style.transform = 'translateX(0)';
         });
       }
+
+      // P2: 显示骨架屏加载态
+      const grid = document.getElementById('cs-chapter-grid');
+      if (grid && !this.chaptersData) {
+        this._showSkeleton(grid);
+      }
+
+      // 异步加载章节数据
+      if (!this.chaptersData) {
+        try {
+          await this.loadChapters();
+        } catch (e) {
+          console.error('[ChapterSelect] Load failed:', e);
+        }
+      }
+
+      // 检查隐藏关和真结局解锁
+      this._checkAllUnlocks();
+
+      // 隐藏骨架屏，渲染内容
+      if (grid) {
+        this._hideSkeleton(grid);
+      }
+      this._render();
     }
 
     // 隐藏
     hide() {
       if (!this._isVisible) return;
       this._isVisible = false;
+
+      // P2: 解锁背景滚动
+      if (typeof _popModal === 'function') {
+        _popModal('chapterSelect');
+      } else {
+        document.body.classList.remove('modal-open');
+      }
+
       const overlay = document.getElementById('chapter-select-overlay');
       if (overlay) {
         overlay.style.opacity = '0';
@@ -1271,6 +1306,32 @@
           overlay.style.display = 'none';
         }, 400);
       }
+    }
+
+    // P2: 显示骨架屏
+    _showSkeleton(container) {
+      if (!container) return;
+      let html = '<div style="padding:20px 0;">';
+      for (let i = 0; i < 5; i++) {
+        html += '<div class="chapter-skeleton-item" style="height:80px;margin-bottom:16px;border-radius:10px;' +
+          'background:linear-gradient(90deg,rgba(60,50,40,0.4) 25%,rgba(80,68,54,0.6) 50%,rgba(60,50,40,0.4) 75%);' +
+          'background-size:200% 100%;animation:skeletonShimmer 1.5s ease-in-out infinite;"></div>';
+      }
+      html += '</div>';
+      // 添加 shimmer keyframes
+      if (!document.getElementById('skeleton-style')) {
+        const style = document.createElement('style');
+        style.id = 'skeleton-style';
+        style.textContent = '@keyframes skeletonShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }';
+        document.head.appendChild(style);
+      }
+      container.innerHTML = html;
+    }
+
+    // P2: 隐藏骨架屏
+    _hideSkeleton(container) {
+      if (!container) return;
+      container.innerHTML = '';
     }
 
     // 构建 DOM

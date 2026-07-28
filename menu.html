@@ -2,17 +2,104 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Caged Cipher · 笼中密码</title>
   <style>
     /* ============================================
+       Design Tokens · 设计令牌
+       ============================================ */
+    :root {
+      /* 颜色系统 */
+      --bg-primary: #15100d;
+      --bg-secondary: #2a211c;
+      --bg-tertiary: #332820;
+      --text-primary: #d4c5a8;
+      --text-secondary: #c4b5a0;
+      --text-muted: #9a8a6e;
+      --accent: #c9a84c;
+      --accent-light: #e0c878;
+      --accent-dark: #a8882f;
+      --accent-gold: #f5e6a8;
+      --accent-bg: rgba(201, 168, 76, 0.15);
+      --accent-border: rgba(201, 168, 76, 0.4);
+      --border-color: rgba(138, 122, 90, 0.4);
+      --border-light: rgba(201, 168, 76, 0.15);
+      --error: #b91c1c;
+      --error-light: #f87171;
+      --success: #22c55e;
+
+      /* 圆角系统 */
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --radius-xl: 10px;
+
+      /* 间距系统 */
+      --space-xs: 4px;
+      --space-sm: 8px;
+      --space-md: 12px;
+      --space-base: 16px;
+      --space-lg: 20px;
+      --space-xl: 24px;
+      --space-2xl: 32px;
+
+      /* 阴影系统 */
+      --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+      --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+      --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.7);
+      --shadow-inset: inset 0 1px 0 rgba(255, 230, 180, 0.08);
+
+      /* 字体系统 */
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --font-serif: "Georgia", "Noto Serif SC", "KaiTi", "STKaiti", serif;
+      --font-mono: "Courier New", "Consolas", monospace;
+      --font-display: "Times New Roman", "Georgia", serif;
+
+      /* 过渡动画 */
+      --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-base: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+      /* ===== Z-Index 层级宪章 ===== */
+      --z-bg: 0;
+      --z-content: 1;
+      --z-overlay: 10000;
+      --z-modal: 15000;
+
+      /* ===== 安全区适配 ===== */
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+
+      /* ===== 响应式尺寸令牌 ===== */
+      --cover-max-width: min(92vw, 420px);
+      --padding-md: clamp(10px, 2.5vw, 16px);
+      --padding-lg: clamp(16px, 4vw, 24px);
+      --padding-xl: clamp(20px, 6vw, 32px);
+
+      /* ===== 统一断点 ===== */
+      --bp-sm: 600px;
+      --bp-md: 900px;
+    }
+
+    /* ============================================
        扉页 · 侦探案卷夹 · 牛皮封面 · 烫金标题 v2.0
        ============================================ */
-    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
     html, body { height: 100%; }
 
     body {
       min-height: 100vh;
+      min-height: 100dvh;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -21,10 +108,10 @@
         radial-gradient(ellipse at 80% 80%, rgba(40, 30, 20, 0.4) 0%, transparent 50%),
         radial-gradient(ellipse at 50% 50%, rgba(50, 38, 28, 0.2) 0%, transparent 70%),
         #15100d;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-family: var(--font-sans);
       user-select: none;
       -webkit-user-select: none;
-      padding: 20px;
+      padding: calc(20px + var(--safe-top)) calc(20px + var(--safe-right)) calc(20px + var(--safe-bottom)) calc(20px + var(--safe-left));
       opacity: 0;
       animation: fadeIn 1s ease forwards;
     }
@@ -37,7 +124,7 @@
     /* 主封面 — 植鞣革 + 牛皮纸多层纹理 */
     .cover {
       width: 100%;
-      max-width: 420px;
+      max-width: var(--cover-max-width);
       padding: 52px 30px 40px;
       background:
         /* 边角磨损阴影 */
@@ -371,7 +458,7 @@
       background: rgba(0, 0, 0, 0.8);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
-      z-index: 1000;
+      z-index: var(--z-modal);
       display: none;
       align-items: center;
       justify-content: center;
@@ -647,8 +734,8 @@
       border: 1px solid rgba(201, 168, 76, 0.6);
     }
 
-    /* 响应式 */
-    @media (max-width: 480px) {
+    /* 响应式（<600px 手机竖屏） */
+    @media (max-width: 600px) {
       .cover { padding: 36px 20px 28px; }
       .logo-en { font-size: 28px; letter-spacing: 6px; }
       .logo-zh { font-size: 15px; letter-spacing: 6px; }
@@ -950,10 +1037,26 @@
       window.location.href = url;
     }
 
-    // === 模态框控制 ===
+    // === 模态框控制 · P2 统一弹窗管理 ===
+    let _modalOpenCount = 0;
+
+    function _lockBodyScroll() {
+      document.body.style.overflow = 'hidden';
+      document.body.classList.add('modal-open');
+    }
+
+    function _unlockBodyScroll() {
+      if (_modalOpenCount <= 0) {
+        document.body.style.overflow = '';
+        document.body.classList.remove('modal-open');
+      }
+    }
+
     function showModal(id) {
       const modal = document.getElementById(id);
       if (modal) {
+        _modalOpenCount++;
+        _lockBodyScroll();
         modal.classList.add('show');
       }
     }
@@ -961,7 +1064,12 @@
     function hideModal(id) {
       const modal = document.getElementById(id);
       if (modal) {
+        _modalOpenCount = Math.max(0, _modalOpenCount - 1);
         modal.classList.remove('show');
+        // 等待动画结束后解锁滚动
+        setTimeout(() => {
+          _unlockBodyScroll();
+        }, 300);
       }
     }
 

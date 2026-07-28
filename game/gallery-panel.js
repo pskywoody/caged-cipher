@@ -184,6 +184,13 @@
         this._buildDOM();
       }
 
+      // P2: 锁定背景滚动
+      if (typeof _pushModal === 'function') {
+        _pushModal('gallery');
+      } else {
+        document.body.classList.add('modal-open');
+      }
+
       this.refresh();
       this._overlay.style.display = 'flex';
       requestAnimationFrame(() => {
@@ -195,6 +202,13 @@
     hide() {
       if (!this._isVisible) return;
       this._isVisible = false;
+
+      // P2: 解锁背景滚动
+      if (typeof _popModal === 'function') {
+        _popModal('gallery');
+      } else {
+        document.body.classList.remove('modal-open');
+      }
 
       if (this._overlay) {
         this._overlay.style.opacity = '0';

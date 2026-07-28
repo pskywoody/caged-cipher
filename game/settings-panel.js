@@ -87,6 +87,14 @@ class SettingsPanel {
   show() {
     if (this.visible) return;
     this.visible = true;
+
+    // P2: 锁定背景滚动
+    if (typeof _pushModal === 'function') {
+      _pushModal('settings');
+    } else {
+      document.body.classList.add('modal-open');
+    }
+
     if (this.overlay) this.overlay.classList.add('show');
     if (this.el) {
       this.el.classList.add('show');
@@ -101,6 +109,14 @@ class SettingsPanel {
   hide() {
     if (!this.visible) return;
     this.visible = false;
+
+    // P2: 解锁背景滚动
+    if (typeof _popModal === 'function') {
+      _popModal('settings');
+    } else {
+      document.body.classList.remove('modal-open');
+    }
+
     if (this.overlay) this.overlay.classList.remove('show');
     if (this.el) {
       // 确保移除拖拽内联样式，回到 CSS 过渡

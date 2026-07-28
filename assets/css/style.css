@@ -1,52 +1,115 @@
-/* Caged Cipher - Main Styles */
+/* ============================================
+   Caged Cipher - Main Styles (Base Layer)
+   P0级 UI 布局规范：安全区、相对单位、z-index 宪章
+   ============================================ */
+
+/* ===== 设计令牌（与 guide.html 保持一致）===== */
+:root {
+  /* Z-Index 层级宪章 */
+  --z-bg: 0;
+  --z-board: 10;
+  --z-board-overlay: 20;
+  --z-hud: 100;
+  --z-floating-bar: 100;
+  --z-hint-bubble: 500;
+  --z-char-bubble: 800;
+  --z-toast: 2000;
+  --z-overlay: 10000;
+  --z-dialog: 15000;
+  --z-climax: 20000;
+  --z-pause: 28000;
+  --z-achievement: 25000;
+  --z-transition: 30000;
+  --z-ending: 35000;
+
+  /* 安全区适配 */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* 响应式尺寸令牌 */
+  --board-max-width: min(92vw, 480px);
+  --num-btn-height: clamp(44px, 12vw, 60px);
+  --num-btn-font: clamp(18px, 5vw, 26px);
+  --toolbar-btn-height: clamp(36px, 10vw, 44px);
+  --gap-sm: clamp(4px, 1.2vw, 6px);
+  --gap-md: clamp(6px, 1.8vw, 8px);
+  --padding-md: clamp(6px, 1.5vw, 10px);
+  --padding-lg: clamp(10px, 2.5vw, 16px);
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* 统一断点 */
+  --bp-sm: 600px;
+  --bp-md: 900px;
+}
 
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
+
+html, body { height: 100%; }
 
 body {
   background: #0f172a;
   color: #f1f5f9;
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Segoe UI', system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
+  /* 安全区适配 */
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
 }
 
 #game-container {
-  max-width: 500px;
+  max-width: var(--board-max-width);
   margin: 0 auto;
-  padding: 16px;
+  padding: var(--padding-lg);
   display: flex;
   flex-direction: column;
   align-items: center;
   height: 100vh;
+  height: 100dvh;
 }
 
 /* Canvas */
 #gameCanvas {
   background: #f5ede0;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
+  width: 100%;
+  aspect-ratio: 1;
+  display: block;
 }
 
 /* Toolbar */
 #toolbar {
   display: flex;
-  gap: 8px;
+  gap: var(--gap-sm);
   margin-top: 12px;
   justify-content: center;
+  width: 100%;
 }
 
 #toolbar button {
-  width: 48px;
-  height: 48px;
-  font-size: 20px;
+  flex: 1;
+  height: var(--toolbar-btn-height);
+  min-height: 36px;
+  font-size: clamp(16px, 4.5vw, 20px);
   border: 1px solid #334155;
   background: #1e293b;
   color: #f1f5f9;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.15s;
   display: flex;
@@ -73,21 +136,23 @@ body {
 #num-pad {
   display: grid;
   grid-template-columns: repeat(9, 1fr);
-  gap: 8px;
+  gap: var(--gap-sm);
   margin-top: 16px;
   width: 100%;
 }
 
 .num-btn {
-  padding: 12px;
-  font-size: 18px;
+  padding: var(--padding-md);
+  font-size: var(--num-btn-font);
   font-weight: 600;
   border: 1px solid #334155;
   background: #1e293b;
   color: #f1f5f9;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.15s;
+  height: var(--num-btn-height);
+  min-height: 44px;
 }
 
 .num-btn:hover {
@@ -103,20 +168,21 @@ body {
 /* Toast */
 .game-toast {
   position: fixed;
-  bottom: 100px;
+  bottom: 120px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(30, 41, 59, 0.95);
   color: #fbbf24;
   padding: 12px 24px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 14px;
   opacity: 0;
-  transition: opacity 0.3s;
-  z-index: 10000;
+  transition: opacity 0.3s, transform 0.3s;
+  z-index: var(--z-toast);
   pointer-events: none;
   border: 1px solid rgba(251, 191, 36, 0.3);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  max-width: 85vw;
 }
 
 .game-toast.show {
@@ -168,7 +234,7 @@ body {
   width: 100%;
   height: 100%;
   background: rgba(0, 0, 0, 0.9);
-  z-index: 20000;
+  z-index: var(--z-dialog);
   display: none;
   flex-direction: column;
   align-items: center;
@@ -179,23 +245,41 @@ body {
   display: flex;
 }
 
-/* Responsive */
+/* 响应式（<600px 手机竖屏） */
 @media (max-width: 600px) {
   #game-container {
-    padding: 8px;
+    padding: var(--padding-md);
   }
-  
-  .num-btn {
-    padding: 10px;
-    font-size: 16px;
-  }
-  
+
   #dialogue-bubble {
     font-size: 14px;
     padding: 12px 16px;
   }
-  
+
   #narrator-text {
     font-size: 16px;
+  }
+}
+
+/* 横屏适配（手机横屏/小平板） */
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 899px) {
+  #game-container {
+    flex-direction: row;
+    max-width: 100%;
+    gap: 16px;
+    padding: 16px;
+    padding-top: calc(16px + var(--safe-top));
+    padding-bottom: calc(16px + var(--safe-bottom));
+    padding-left: calc(16px + var(--safe-left));
+    padding-right: calc(16px + var(--safe-right));
+    align-items: flex-start;
+  }
+
+  #gameCanvas {
+    max-width: calc(100vh - 32px);
+    max-height: calc(100vh - 32px);
+    width: auto;
+    height: calc(100vh - 32px);
+    height: calc(100dvh - 32px);
   }
 }
