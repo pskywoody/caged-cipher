@@ -296,7 +296,7 @@
     ctx.onAfterInitBoard = function() {
       // 先从 ctx 获取 gameController（闭包变量可能还没同步）
       const gc = ctx.gameController || (orchestrator && orchestrator.ctx && orchestrator.ctx.gameController);
-      // 先同步 board/renderer 到闭包（确保 bindEvents 使用正确的引用）
+      // 先同步 board/renderer/levelData 到闭包（确保 bindEvents 使用正确的引用）
       if (gc) {
         board = gc.board;
         renderer = gc.renderer;
@@ -304,6 +304,10 @@
         techMatrix = gc.techMatrix;
         comboSystem = gc.comboSystem;
         comedySystem = gc.comedySystem;
+        // 同步关卡数据（getSolution 依赖这个闭包变量）
+        currentLevelData = gc.currentLevelData;
+        currentLevelId = gc.currentLevelId;
+        currentChapterData = gc.currentChapterData;
         // 同步 gameController 到闭包
         gameController = gc;
       }
@@ -314,6 +318,9 @@
       ctx.techMatrix = techMatrix;
       ctx.comboSystem = comboSystem;
       ctx.comedySystem = comedySystem;
+      ctx.currentLevelData = currentLevelData;
+      ctx.currentLevelId = currentLevelId;
+      ctx.currentChapterData = currentChapterData;
       
       bindEvents();
       // 同步 inputRouter 回 ctx
@@ -634,22 +641,22 @@
   // ============================================================
   //  What If 模式（转发到 WhatIfManager）
   // ============================================================
-  function _createWhatIfSnapshot(l) { return whatIfManager._createWhatIfSnapshot(l); }
-  function _hasChangesFromRoot(r) { return whatIfManager._hasChangesFromRoot(r); }
-  function _restoreWhatIfSnapshot(s) { return whatIfManager._restoreWhatIfSnapshot(s); }
-  function _createSnapshotThumbnail(s, i) { return whatIfManager._createSnapshotThumbnail(s, i); }
-  function _renderWhatIfSnapshots() { return whatIfManager._renderWhatIfSnapshots(); }
-  function _updateFloatBarBadge() { return whatIfManager._updateFloatBarBadge(); }
-  function _syncWhatIfSnapshotsToPc() { return whatIfManager._syncWhatIfSnapshotsToPc(); }
-  function enterWhatIfMode() { return whatIfManager.enterMode(); }
-  function _doEnterWhatIf() { return whatIfManager._doEnter(); }
-  function exitWhatIfMode(a) { return whatIfManager.exitMode(a); }
-  function toggleWhatIfMode() { return whatIfManager.toggleMode(); }
-  function addWhatIfSnapshot(l) { return whatIfManager.addSnapshot(l); }
-  function jumpToWhatIfSnapshot(i) { return whatIfManager.jumpToSnapshot(i); }
-  function undoWhatIfStep() { return whatIfManager.undoStep(); }
-  function adoptWhatIfChanges() { return whatIfManager.adoptChanges(); }
-  function resetWhatIfToRoot() { return whatIfManager.resetToRoot(); }
+  function _createWhatIfSnapshot(l) { return whatIfManager && whatIfManager._createWhatIfSnapshot ? whatIfManager._createWhatIfSnapshot(l) : null; }
+  function _hasChangesFromRoot(r) { return whatIfManager && whatIfManager._hasChangesFromRoot ? whatIfManager._hasChangesFromRoot(r) : false; }
+  function _restoreWhatIfSnapshot(s) { return whatIfManager && whatIfManager._restoreWhatIfSnapshot ? whatIfManager._restoreWhatIfSnapshot(s) : null; }
+  function _createSnapshotThumbnail(s, i) { return whatIfManager && whatIfManager._createSnapshotThumbnail ? whatIfManager._createSnapshotThumbnail(s, i) : null; }
+  function _renderWhatIfSnapshots() { return whatIfManager && whatIfManager._renderWhatIfSnapshots ? whatIfManager._renderWhatIfSnapshots() : null; }
+  function _updateFloatBarBadge() { return whatIfManager && whatIfManager._updateFloatBarBadge ? whatIfManager._updateFloatBarBadge() : null; }
+  function _syncWhatIfSnapshotsToPc() { return whatIfManager && whatIfManager._syncWhatIfSnapshotsToPc ? whatIfManager._syncWhatIfSnapshotsToPc() : null; }
+  function enterWhatIfMode() { return whatIfManager && whatIfManager.enterMode ? whatIfManager.enterMode() : null; }
+  function _doEnterWhatIf() { return whatIfManager && whatIfManager._doEnter ? whatIfManager._doEnter() : null; }
+  function exitWhatIfMode(a) { return whatIfManager && whatIfManager.exitMode ? whatIfManager.exitMode(a) : null; }
+  function toggleWhatIfMode() { return whatIfManager && whatIfManager.toggleMode ? whatIfManager.toggleMode() : null; }
+  function addWhatIfSnapshot(l) { return whatIfManager && whatIfManager.addSnapshot ? whatIfManager.addSnapshot(l) : null; }
+  function jumpToWhatIfSnapshot(i) { return whatIfManager && whatIfManager.jumpToSnapshot ? whatIfManager.jumpToSnapshot(i) : null; }
+  function undoWhatIfStep() { return whatIfManager && whatIfManager.undoStep ? whatIfManager.undoStep() : null; }
+  function adoptWhatIfChanges() { return whatIfManager && whatIfManager.adoptChanges ? whatIfManager.adoptChanges() : null; }
+  function resetWhatIfToRoot() { return whatIfManager && whatIfManager.resetToRoot ? whatIfManager.resetToRoot() : null; }
 
   // ============================================================
   //  HintPlayer / NarrationSystem 转发
