@@ -624,7 +624,9 @@
         board.setNumber(num);
         this.AudioService.sfx.play('fill_correct');
         this._vibrate(this.VIBRATE_PRESETS.FILL);
-        this.expertSystem.onFillCorrect(r, c, num);
+        if (this.expertSystem) {
+          this.expertSystem.onFillCorrect(r, c, num);
+        }
         // 连击系统：正确填数
         if (this.comboSystem) {
           this.comboSystem.onCorrectFill(r, c, num);
@@ -707,7 +709,9 @@
         // 震动反馈
         this._vibrate(this.VIBRATE_PRESETS.ERROR);
         this._incErrorCount();
-        this.expertSystem.onFillWrong(r, c, num);
+        if (this.expertSystem) {
+          this.expertSystem.onFillWrong(r, c, num);
+        }
         // 连击系统：错误填数
         if (this.comboSystem) {
           this.comboSystem.onWrongFill(r, c, num);
